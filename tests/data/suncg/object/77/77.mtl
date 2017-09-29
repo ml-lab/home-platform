@@ -1,0 +1,36 @@
+newmtl material_0
+Ka 0.800000 0.800000 0.800000
+Kd 0.800000 0.800000 0.800000
+Ks 0.010000 0.010000 0.010000
+Ns 10
+d 1.000000
+illum 2
+map_Kd ../../texture//textile_1_6.jpg
+
+newmtl material_1
+Ka 0.800000 0.800000 0.800000
+Kd 0.800000 0.800000 0.800000
+Ks 0.010000 0.010000 0.010000
+Ns 10
+d 1.000000
+illum 2
+map_Kd ../../texture//textile_3_5.jpg
+
+newmtl material_2
+Ka 0.663881 0.663881 0.663881
+Kd 0.663881 0.663881 0.663881
+Ks 0.500000 0.500000 0.500000
+Ns 50
+d 1.000000
+illum 2
+map_Kd ../../texture//wood_7.jpg
+
+newmtl material_3
+Ka 0.800000 0.800000 0.800000
+Kd 0.800000 0.800000 0.800000
+Ks 0.196721 0.196721 0.196721
+Ns 10
+d 1.000000
+illum 2
+map_Kd ../../texture//leather_2_4.jpg
+
