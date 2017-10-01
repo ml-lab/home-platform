@@ -32,7 +32,7 @@ import unittest
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.core import House, Room, Object
+from multimodalmaze.core import House, Object, Agent
     
 class TestHouse(unittest.TestCase):
     
@@ -40,14 +40,8 @@ class TestHouse(unittest.TestCase):
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
                                    TEST_SUNCG_DATA_DIR)
         self.assertTrue(house.getNbLevels() == 1)
-        
-class TestRoom(unittest.TestCase):
-    
-    def testInit(self):
-        _ = Room.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                               TEST_SUNCG_DATA_DIR,
-                               modelId="fr_0rm_1")
-        
+        self.assertTrue(len(house.rooms) == 4)
+                
 class TestObject(unittest.TestCase):
     
     def testInit(self):
@@ -57,6 +51,11 @@ class TestObject(unittest.TestCase):
         assert os.path.exists(modelFilename)
         instanceId = str(modelId) + '-0'
         _ = Object(instanceId, modelId, modelFilename)
+
+class TestAgent(unittest.TestCase):
+    
+    def testInit(self):
+        _ = Agent('agent', os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg'))
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

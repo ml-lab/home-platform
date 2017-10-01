@@ -393,6 +393,9 @@ class ModelCategoryMapping(object):
             name = c.replace("_", " ")
             print "'%s':'%s'," % (c, name)
     
+    def getFineGrainedCategoryForModelId(self, modelId):
+        return ModelCategoryMapping.fineMapping[str(modelId)]
+    
     def getFineGrainedClassList(self):
         return sorted(set(self.fine_grained_class.values()))
     

@@ -27,36 +27,21 @@
 import os
 import numpy as np
 
-from panda3d.core import Vec3, Mat4, CS_zup_right, CS_yup_right
+from panda3d.core import Vec3, Mat4, CS_zup_right, CS_yup_right, LoaderOptions, Filename, NodePath, Loader, ClockObject, BitMask32
 
-from panda3d.bullet import BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
-                            BulletDebugNode, BulletPlaneShape
+from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
+                            BulletDebugNode, BulletPlaneShape, BulletCapsuleShape, BulletCharacterControllerNode, ZUp
 
 
 #TODO: sweep map with agent to find navigable 2D map
 #    see: https://www.panda3d.org/manual/index.php/Bullet_Queries
 
-# # from panda3d.core import Mat4, CS_zup_right, CS_yup_right
-# #yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-# yupTransformMat = np.array([[1,0,0,0],
-#                             [0,0,-1,0],
-#                             [0,1,0,0],
-#                             [0,0,0,1]])
-# 
-# #zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-# zupTransformMat = np.array([[1,0,0,0],
-#                             [0,0,1,0],
-#                             [0,-1,0,0],
-#                             [0,0,0,1]])
-# 
-# #print 'yupTransformMat = ', yupTransformMat
-# #print 'zupTransformMat = ', zupTransformMat
-# #transform = np.dot(np.dot(transformMat, yupTransformMat), zupTransformMat)
-
-
 class PhysicWorld(object):
     
     def __init__(self):
+        pass
+
+    def addAgentToScene(self, agent):
         pass
 
     def addObjectToScene(self, obj):
@@ -71,9 +56,6 @@ class PhysicWorld(object):
     def step(self, time):
         pass
     
-    def run(self):
-        pass
-    
     def resetScene(self):
         pass
 
@@ -81,33 +63,77 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
 
     def __init__(self, debug=False):
 
-        from panda3d.bullet import BulletWorld
-        self.world = BulletWorld()
-        self.world.setGravity(Vec3(0, 0, -9.81))
+        self.physicWorld = BulletWorld()
+        self.physicWorld.setGravity(Vec3(0, 0, -9.81))
+        self.globalClock = ClockObject.getGlobalClock()
+        
+        self.render = NodePath('physic-render')
         
         # Plane
         shape = BulletPlaneShape(Vec3(0, 0, 1), 0)
-        node = BulletRigidBodyNode('Ground')
+        node = BulletRigidBodyNode('physic-ground')
         node.addShape(shape)
-        np = base.render.attachNewNode(node)
-        np.setPos(0, 0, 0)
-        self.world.attach(node)
+        self.groundNodePath = self.render.attachNewNode(node)
+        self.groundNodePath.setPos(0, 0, 0)
+        self.physicWorld.attach(node)
         
         if debug:
-            debugNode = BulletDebugNode('Debug')
+            debugNode = BulletDebugNode('physic-debug')
             debugNode.showWireframe(True)
             debugNode.showConstraints(True)
             debugNode.showBoundingBoxes(True)
             debugNode.showNormals(True)
-            debugNP = base.render.attachNewNode(debugNode)
-            debugNP.show()
+            self.debugNodePath = self.render.attachNewNode(debugNode)
+            self.debugNodePath.show()
+            self.physicWorld.setDebugNode(debugNode)
+        else:
+            self.debugNodePath = None
+    
+    def _loadModel(self, modelPath):
+        loader = Loader.getGlobalPtr()
+        loaderOptions = LoaderOptions()
+        node = loader.loadSync(Filename(modelPath), loaderOptions)
+        if node is not None:
+            nodePath = NodePath(node)
+        else:
+            raise IOError('Could not load model file: %s' % (modelPath))
+        return nodePath
+    
+    def connectToRenderWorld(self, renderWorld):
+
+        # Add debug node, if any
+        if self.debugNodePath is not None:
+            self.debugNodePath.reparentTo(renderWorld.render)
+        self.groundNodePath.reparentTo(renderWorld.render)
+
+        # Loop throught all physic-related nodepaths in graph
+        for physicNodePath in self.render.getChildren():
             
-        self.world.setDebugNode(debugNP.node())
+            # Find matching nodepath in render-related graph
+            name = physicNodePath.getName()
+            renderNodePath = renderWorld.render.find('**/%s*' % (name))
+            if renderNodePath.getNumNodes() == 0:
+                raise Exception('Could not find matching nodepath for rendering: %s' % (name))
             
+            # Reparent physic-related node to render graph
+            physicNodePath.reparentTo(renderNodePath.getParent())
+            renderNodePath.reparentTo(physicNodePath)
+    
+    def addAgentToScene(self, agent, radius=0.25, height=1.6):
+        
+        #NOTE: implement agent with Bullet Character Controller
+        #      see: https://www.panda3d.org/manual/index.php/Bullet_Character_Controller
+        shape = BulletCapsuleShape(radius, height - 2*radius, ZUp)
+        node = BulletCharacterControllerNode(shape, radius, 'agent-' + str(agent.instanceId))
+        self.physicWorld.attach(node)
+        nodePath = self.render.attachNewNode(node)
+        nodePath.setCollideMask(BitMask32.allOn())
+        return nodePath
+                
     def addObjectToScene(self, obj, dynamic=True, mode='bbox'):
 
         # Load model from file
-        model = base.loader.loadModel(obj.modelFilename)
+        model = self._loadModel(obj.modelFilename)
         
         if obj.transform is not None:
             # 4x4 column-major transformation matrix from object coordinates to scene coordinates
@@ -127,7 +153,8 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
                     mesh.addGeom(geom)
             #TODO: is is the shape that is dynamic?
             shape = BulletTriangleMeshShape(mesh, dynamic=dynamic)
-            node = BulletRigidBodyNode(obj.instanceId)
+            
+            node = BulletRigidBodyNode('object-' + str(obj.instanceId))
             node.setMass(0.0)
             node.addShape(shape)
         elif mode == 'bbox':
@@ -136,20 +163,20 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
             dims = maxBounds - minBounds
             shape = BulletBoxShape(Vec3(dims.x/2, dims.y/2, dims.z/2))
 
-            node = BulletRigidBodyNode(obj.instanceId)
+            node = BulletRigidBodyNode('object-' + str(obj.instanceId))
             node.setMass(0.0)
             node.addShape(shape)
         else:
             raise Exception('Unknown mode type for physic object collision shape: %s' % (mode))
     
-        np = base.render.attachNewNode(node)
-        np.setMat(model.getMat())
+        nodePath = self.render.attachNewNode(node)
+        nodePath.setMat(model.getMat())
     
         model.detachNode()
         
-        self.world.attach(node)
+        self.physicWorld.attach(node)
         
-        return node
+        return nodePath
     
     def addRoomToScene(self, room):
 
@@ -157,8 +184,7 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         for modelFilename in room.modelFilenames:
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
-            objInstanceId = 'room-' + str(room.instanceId) + '-' + partId
-            model = base.loader.loadModel(modelFilename)
+            model = self._loadModel(modelFilename)
             
             mesh = BulletTriangleMesh()
             geomNodes = model.findAllMatches('**/+GeomNode')
@@ -168,12 +194,12 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
                     geom = geomNode.getGeom(n)
                     mesh.addGeom(geom)
             shape = BulletTriangleMeshShape(mesh, dynamic=False)       
-            node = BulletRigidBodyNode(objInstanceId)
+            node = BulletRigidBodyNode('room-' + str(room.instanceId) + '-' + partId)
             node.setMass(0.0)
             node.addShape(shape)
             
-            self.world.attach(node)
-            np = base.render.attachNewNode(node)
+            self.physicWorld.attach(node)
+            np = self.render.attachNewNode(node)
 
             nodes.append(node)
             model.detachNode()
@@ -197,13 +223,9 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
             
         return nodes
     
-    def step(self, t=0.0):
-        dt = globalClock.getDt()
-        self.world.doPhysics(dt)
-    
-    def run(self):
-        while True:
-            self.step()
+    def step(self):
+        dt = self.globalClock.getDt()
+        self.physicWorld.doPhysics(dt)
     
     def resetScene(self):
         pass

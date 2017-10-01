@@ -32,6 +32,17 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
+class Agent(object):
+    
+    def __init__(self, instanceId, modelFilename=None, transform=None):
+        self.instanceId = instanceId
+        self.transform = transform
+        self.modelFilename = modelFilename
+        self.attributes = {}
+
+    def clearAttributes(self):
+        self.attributes.clear()
+
 class Object(object):
     
     def __init__(self, instanceId, modelId, modelFilename, parentRoom=None, transform=None):
@@ -40,96 +51,43 @@ class Object(object):
         self.parentRoom = parentRoom
         self.transform = transform
         self.modelFilename = modelFilename
-        self.physicObject = None
-        self.renderObject = None
+        self.attributes = {}
+
+    def clearAttributes(self):
+        self.attributes.clear()
 
 class Room(object):
 
-    def __init__(self, modelId, sceneId, levelId, modelFilenames, objects=[]):
+    def __init__(self, modelId, sceneId, levelId, modelFilenames, objects=None):
         self.levelId = levelId
         self.instanceId = modelId
         self.modelId = modelId
         self.sceneId = sceneId
         self.modelFilenames = modelFilenames
+        if objects is None:
+            objects = []
         self.objects = objects
-        
-    @staticmethod
-    def loadFromJson(filename, datasetRoot, modelId):
-        
-        with open(filename) as f:
-            data = json.load(f)
-        
-        room = None
-        objectIds = {}
-        sceneId = data['id']
-        roomByNodeIndex = {}
-        for levelId, level in enumerate(data['levels']):
-            
-            for nodeIndex, node in enumerate(level['nodes']):
-                if not node['valid'] == 1: continue
-                    
-                if node['type'] == 'Room':
-                    if not node['modelId'] == modelId: continue
-                    
-                    logger.debug('Loading Room %s to scene' % (node['modelId']))
-                    
-                    # Get room model filenames
-                    modelFilenames = []
-                    for roomObjFilename in glob.glob(os.path.join(datasetRoot, 'room', sceneId, modelId + '*.obj')):
-                        
-                        # Convert from OBJ + MTL to EGG format
-                        f, _ = os.path.splitext(roomObjFilename)
-                        modelFilename = f + ".egg"
-                        if not os.path.exists(modelFilename):
-                            raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
-                        modelFilenames.append(modelFilename)
-                    
-                    room = Room(modelId, sceneId, levelId, modelFilenames)
-                    
-                    for childNodeIndex in node['nodeIndices']:
-                        roomByNodeIndex[childNodeIndex] = room
-                    
-                elif node['type'] == 'Object':
-                    if not nodeIndex in roomByNodeIndex: continue
-                    
-                    logger.debug('Loading Object %s to scene' % (node['modelId']))
-                    
-                    # Convert from OBJ + MTL to EGG format
-                    objFilename = os.path.join(datasetRoot, 'object', node['modelId'], node['modelId'] + '.obj')
-                    assert os.path.exists(objFilename)
-                    f, _ = os.path.splitext(objFilename)
-                    modelFilename = f + ".egg"
-                    if not os.path.exists(modelFilename):
-                        raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
-                     
-                    # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-                    transform = np.array(node['transform']).reshape((4,4))
-                    
-                    # Instance identification
-                    if modelId in objectIds:
-                        objectIds[modelId] = objectIds[modelId] + 1
-                    else:
-                        objectIds[modelId] = 0
-                    instanceId = modelId + '-' + str(objectIds[modelId])
-                    
-                    obj = Object(instanceId, modelId, modelFilename, room, transform)
-                    room.objects.append(obj)
-                else:
-                    raise Exception('Unsupported node type: %s' % (node['type']))
-                
-        if room is None:
-            raise Exception('Room %s not found in JSON file %s' % (modelId, filename))
-                
-        return room
+        self.attributes = {}
+
+    def clearAttributes(self):
+        self.attributes.clear()
     
 class House(object):
     
-    def __init__(self, sceneId, rooms=[], objects=[], showCeiling=True):
+    def __init__(self, sceneId, rooms=None, objects=None, showCeiling=True):
         self.instanceId = sceneId
         self.sceneId = sceneId
+        if rooms is None:
+            rooms = []
         self.rooms = rooms
+        if objects is None:
+            objects = []
         self.objects = objects
         self.showCeiling = showCeiling
+        self.attributes = {}
+        
+    def clearAttributes(self):
+        self.attributes.clear()
 
     def getNbLevels(self):
         levelIds = []

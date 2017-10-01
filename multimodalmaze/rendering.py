@@ -28,14 +28,26 @@
 # OF SUCH DAMAGE.
 
 import os
+import logging
 import numpy as np
 
 from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, CS_yup_right, CS_zup_right, \
-                         GeomVertexReader, GeomTristrips
+                         GeomVertexReader, GeomTristrips, Material
+                         
+from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
+                         Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
+from direct.showbase.ShowBase import ShowBase
+
+logger = logging.getLogger(__name__)
+
+MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "models")
 
 class RenderWorld(object):
 
     def __init__(self):
+        pass
+
+    def addAgentToScene(self, agent):
         pass
 
     def addObjectToScene(self, obj):
@@ -50,28 +62,145 @@ class RenderWorld(object):
     def step(self, time):
         pass
     
-    def run(self):
-        pass
-    
     def resetScene(self):
         pass
 
+#TODO: add support for multithreading?
+#      see: https://www.panda3d.org/manual/index.php/Multithreaded_Render_Pipeline
+
 class Panda3dRenderWorld(RenderWorld):
 
-    def __init__(self, shadowing=True, showCeiling=True):
+    #TODO: add a debug mode showing wireframe only?
+    #      render.setRenderModeWireframe()
+
+    def __init__(self, size=(512,512), shadowing=True, showCeiling=True):
         
-        self.scene = base.render.attachNewNode('scene')
+        self.size = size
+        self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+        self.loader = Loader.getGlobalPtr()
+        self.graphicsEngine.setDefaultLoader(self.loader)
         
-        base.disableMouse()
+        self.render = NodePath('render')
+        self.render.setAttrib(RescaleNormalAttrib.makeDefault())
+        self.render.setTwoSided(0)
+        
+        selection = GraphicsPipeSelection.getGlobalPtr()
+        self.pipe = selection.makeDefaultPipe()
+        logger.debug('Using %s' % (self.pipe.getInterfaceName()))
+        
+        self.camera = self.render.attachNewNode(ModelNode('camera'))
+        self.camera.node().setPreserveTransform(ModelNode.PTLocal)
+        
+        self.scene = self.render.attachNewNode('scene')
+        
+        self._initRgbCapture()
+        self._initDepthCapture()
         
         self.__dict__.update(shadowing=shadowing, showCeiling=showCeiling)
 
-    def step(self, time):
-        taskMgr.step()
+    def _initRgbCapture(self):
 
-    def run(self):
-        base.run()
+        camNode = Camera('RGB camera')
+        lens = PerspectiveLens()
+        lens.setAspectRatio(1.0)
+        #lens.setNear(5.0)
+        #lens.setFar(500.0)
+        camNode.setLens(lens)
+        camNode.setScene(self.render)
+        cam = self.camera.attachNewNode(camNode)
+        
+        winprops = WindowProperties.getDefault()
+        winprops = WindowProperties(winprops)
+        winprops.setSize(self.size[0], self.size[1])
+        fbprops = FrameBufferProperties.getDefault()
+        fbprops = FrameBufferProperties(fbprops)
+        fbprops.setRgbColor(1)
+        fbprops.setColorBits(24)
+        fbprops.setAlphaBits(8)
+        fbprops.setDepthBits(1) 
+        flags = GraphicsPipe.BFFbPropsOptional | GraphicsPipe.BFRefuseWindow
+        buf = self.graphicsEngine.makeOutput(self.pipe, 'RGB buffer', 0, fbprops,
+                                             winprops, flags)
+        
+        dr = buf.makeDisplayRegion()
+        dr.setSort(0)
+        dr.setCamera(cam)
+        dr = camNode.getDisplayRegion(0)
+        
+        tex = Texture()
+        tex.setFormat(Texture.FRgb)
+        buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
+        
+        self.rgbBuffer = buf
+        self.rgbTex = tex
     
+    def _initDepthCapture(self):
+        
+        camNode = Camera('Depth camera')
+        lens = PerspectiveLens()
+        lens.setAspectRatio(1.0)
+        #lens.setNear(5.0)
+        #lens.setFar(500.0)
+        camNode.setLens(lens)
+        camNode.setScene(self.render)
+        cam = self.camera.attachNewNode(camNode)
+        
+        winprops = WindowProperties.getDefault()
+        winprops = WindowProperties(winprops)
+        winprops.setSize(self.size[0], self.size[1])
+        fbprops = FrameBufferProperties()
+        fbprops.setColorBits(0)
+        fbprops.setAlphaBits(0)
+        fbprops.setStencilBits(0)
+        fbprops.setMultisamples(0)
+        fbprops.setDepthBits(1)
+        flags = GraphicsPipe.BFFbPropsOptional | GraphicsPipe.BFRefuseWindow
+        buf = self.graphicsEngine.makeOutput(self.pipe, 'Depth buffer', 0, fbprops,
+                                             winprops, flags)
+        
+        dr = buf.makeDisplayRegion()
+        dr.setSort(0)
+        dr.setCamera(cam)
+        dr = camNode.getDisplayRegion(0)
+        
+        tex = Texture()
+        tex.setFormat(Texture.FDepthComponent)
+        buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPDepth)
+    
+        self.depthBuffer = buf
+        self.depthTex = tex
+        
+    def destroy(self):
+        self.graphicsEngine.removeAllWindows()
+        del self.pipe
+
+    def getRgbImage(self, channelOrder="RGBA"):
+        data = self.rgbTex.getRamImageAs(channelOrder)
+        image = np.frombuffer(data.get_data(), np.uint8)
+        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
+        image = np.flipud(image)
+        return image
+    
+    def getDepthImage(self):
+        data = self.depthTex.getRamImage()
+        depthImage = np.frombuffer(data.get_data(), np.float32)
+        depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize(), self.depthTex.getNumComponents())
+        depthImage = np.flipud(depthImage)
+        return depthImage
+
+    def step(self):
+        #NOTE: we may need to call frame rendering twice because of double-buffering
+        self.graphicsEngine.renderFrame()
+        
+    def loadModel(self, modelPath):
+        loaderOptions = LoaderOptions()
+        node = self.loader.loadSync(Filename(modelPath), loaderOptions)
+        if node is not None:
+            nodePath = NodePath(node)
+        else:
+            raise IOError('Could not load model file: %s' % (modelPath))
+        return nodePath
+
     def addDefaultLighting(self):
         
         for x,y in [(0,0),(30,0),(0,30),(-30,0),(0,-30)]:
@@ -109,12 +238,22 @@ class Panda3dRenderWorld(RenderWorld):
     
     def setCamera(self, mat):
         mat = Mat4(*mat.ravel())
-        base.camera.setMat(mat)
+        self.camera.setMat(mat)
     
+    def addAgentToScene(self, agent):
+        
+        node = self.scene.attachNewNode('agent-' + str(agent.instanceId))
+        if agent.modelFilename is not None:
+            model = self.loadModel(agent.modelFilename)
+            model.reparentTo(node)
+        
+        node.reparentTo(self.scene)
+        return node
+        
     def addObjectToScene(self, obj):
 
         node = self.scene.attachNewNode('object-' + str(obj.instanceId))
-        model = base.loader.loadModel(obj.modelFilename)
+        model = self.loadModel(obj.modelFilename)
         model.reparentTo(node)
         
         if obj.transform is not None:
@@ -124,7 +263,7 @@ class Panda3dRenderWorld(RenderWorld):
             zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
             model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
         
-        node.reparentTo(self.scene)
+        #node.reparentTo(self.scene)
         return model
     
     def addRoomToScene(self, room):
@@ -134,7 +273,7 @@ class Panda3dRenderWorld(RenderWorld):
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
             objNode = node.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
-            model = base.loader.loadModel(modelFilename)
+            model = self.loadModel(modelFilename)
             model.reparentTo(objNode)
             
             if not self.showCeiling and 'c' in os.path.basename(modelFilename):
@@ -144,7 +283,6 @@ class Panda3dRenderWorld(RenderWorld):
             objNode = self.addObjectToScene(obj)
             objNode.reparentTo(node)
             
-        node.reparentTo(self.scene)
         return node
     
     def addHouseToScene(self, house):
@@ -162,6 +300,7 @@ class Panda3dRenderWorld(RenderWorld):
         return node
 
     def resetScene(self):
+        # FIXME: find out why this function outputs a lot of logs to STDERR 
         childNodes = self.scene.ls()
         if childNodes is not None:
             for node in childNodes:
@@ -171,7 +310,7 @@ class Panda3dRenderWorld(RenderWorld):
         self.scene.clearShader()
         self.scene.detachNode()
         self.scene.removeNode()
-        self.scene = base.render.attachNewNode('scene')
+        self.scene = self.render.attachNewNode('scene')
 
 def get3DPointsFromModel(model):
     geomNodes = model.findAllMatches('**/+GeomNode')
