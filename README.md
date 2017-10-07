@@ -1,11 +1,14 @@
 # Multimodal maze
 Multimodal maze environment based on the SUNCG indoor scenes dataset.
 
+![alt tag](https://github.com/IGLU-CHISTERA/multimodal-maze/raw/master/doc/images/multimodalmaze.jpg)
+
 ## Dependencies
 
 Main requirements:
 - Python 2.7 with Numpy, Scipy and Matplotlib
 - [Panda3d](https://www.panda3d.org/) game engine for 3D rendering
+- [EVERT](https://github.com/sbrodeur/evert) engine for 3D acoustic ray-tracing
 
 To install dependencies on Ubuntu operating systems:
 ```

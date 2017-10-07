@@ -9,7 +9,7 @@
 #  - Redistributions in binary form must reproduce the above copyright notice, 
 #    this list of conditions and the following disclaimer in the documentation 
 #    and/or other materials provided with the distribution.
-#  - Neither the name of the NECOTIS research group nor the names of its contributors 
+#  - Neither the name of the copyright holder nor the names of its contributors 
 #    may be used to endorse or promote products derived from this software 
 #    without specific prior written permission.
 # 
@@ -32,9 +32,6 @@ from panda3d.core import Vec3, Mat4, CS_zup_right, CS_yup_right, LoaderOptions, 
 from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
                             BulletDebugNode, BulletPlaneShape, BulletCapsuleShape, BulletCharacterControllerNode, ZUp
 
-
-#TODO: sweep map with agent to find navigable 2D map
-#    see: https://www.panda3d.org/manual/index.php/Bullet_Queries
 
 class PhysicWorld(object):
     
@@ -131,6 +128,9 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         return nodePath
                 
     def addObjectToScene(self, obj, dynamic=True, mode='bbox'):
+
+        #TODO: use functions from:
+        #      https://gist.github.com/AWhetter/4dee6698e96b335f238d#file-collision_geom-py
 
         # Load model from file
         model = self._loadModel(obj.modelFilename)
@@ -231,9 +231,9 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         pass
 
 def calculate2dMapFromScene(house, actor):
-    pass
 
-    # NOTE: no need for rendering here
+    #TODO: sweep map with agent to find navigable 2D map
+    #    see: https://www.panda3d.org/manual/index.php/Bullet_Queries
     
     #TODO: get the bounding box of the scene.
     
@@ -242,3 +242,5 @@ def calculate2dMapFromScene(house, actor):
     #TODO: sweep the position of the agent across the grid, checking if collision/contacts occurs with objects or walls in the scene.
     
     #TODO: using random starting points, use the brushfire algorithm to see which cells are assessible for navigation and path-planning in the scene.
+    
+    pass

@@ -32,11 +32,10 @@ import logging
 import numpy as np
 
 from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, CS_yup_right, CS_zup_right, \
-                         GeomVertexReader, GeomTristrips, Material
+                         GeomVertexReader, GeomTristrips, GeomTriangles
                          
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
-from direct.showbase.ShowBase import ShowBase
 
 logger = logging.getLogger(__name__)
 
@@ -332,13 +331,12 @@ def get3DPointsFromModel(model):
 def get3DTrianglesFromModel(model):
     geomNodes = model.findAllMatches('**/+GeomNode')
     
-    pts = []
-    hvlines = []
+    triangles = []
     for nodePath in geomNodes:
         geomNode = nodePath.node()
         
-        if 'WallInside' not in geomNode.name: continue
-        print geomNode
+        #if 'WallInside' not in geomNode.name: continue
+        #print geomNode
         
         for n in range(geomNode.getNumGeoms()):
             geom = geomNode.getGeom(n)
@@ -348,7 +346,7 @@ def get3DTrianglesFromModel(model):
                 prim = geom.getPrimitive(k)
                 vdata = geom.getVertexData()
                 vertex = GeomVertexReader(vdata, 'vertex')
-                assert isinstance(prim, GeomTristrips)
+                assert isinstance(prim, (GeomTristrips, GeomTriangles))
                 
                 # Decompose into triangles
                 prim = prim.decompose()
@@ -363,16 +361,9 @@ def get3DTrianglesFromModel(model):
                         v = vertex.getData3f()
                         triPts.append([v.x, v.y, v.z])
                         #print "prim %s has vertex %s: %s" % (p, vi, repr(v))
-                    pts.extend(triPts)
-                        
-                    triPts = np.array(triPts)
-                    for i in range(len(triPts)-1):
-                        hvline = triPts[i+1] - triPts[i]
-                        if hvline[2] < 0.01:
-                            hvline *= 0.0
-                        hvlines.append(hvline)
+                    triangles.append(triPts)
             
-    return np.array(pts), np.array(hvlines)
+    return np.array(triangles)
 
 # From: https://stackoverflow.com/questions/2827393/angles-between-two-n-dimensional-vectors-in-python
 def angle_between(v1, v2):

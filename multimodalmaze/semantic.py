@@ -25,40 +25,36 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import logging
-import numpy as np
-import unittest
 
-TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
-TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
+from multimodalmaze.suncg import ModelCategoryMapping
 
-from multimodalmaze.core import House, Object, Agent
+class SemanticWorld(object):
+
+    def __init__(self):
+        pass
+
+    def addObjectToScene(self, obj):
+        pass
     
-class TestHouse(unittest.TestCase):
+    def addRoomToScene(self, room):
+        pass
     
-    def testLoadFromJson(self):
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
-        self.assertTrue(house.getNbLevels() == 1)
-        self.assertTrue(len(house.rooms) == 4)
-                
-class TestObject(unittest.TestCase):
+    def addHouseToScene(self, house):
+        pass
+
+class SuncgSemanticWorld(SemanticWorld):
     
-    def testInit(self):
+    def __init__(self, datasetRoot):
+        self.categoryMapping = ModelCategoryMapping(os.path.join(datasetRoot, 'metadata', 'ModelCategoryMapping.csv'))
+    
+    def describeObject(self, obj):
         
-        modelId = '126'
-        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".obj")
-        assert os.path.exists(modelFilename)
-        instanceId = str(modelId) + '-0'
-        _ = Object(instanceId, modelId, modelFilename)
-
-class TestAgent(unittest.TestCase):
-    
-    def testInit(self):
-        _ = Agent('agent', os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg'))
+        # TODO: category attribute from the SUNCG mapping
+        category = self.categoryMapping.getFineGrainedCategoryForModelId(obj.modelId)
         
-if __name__ == '__main__':
-    logging.basicConfig(level=logging.WARN)
-    np.seterr(all='raise')
-    unittest.main()
-    
+        # TODO: color attribute of the main material RGB values
+        color = 'red'
+        
+        # Add attributes to object
+        obj.attributes['semantic-category'] = category
+        obj.attributes['semantic-color'] = color
