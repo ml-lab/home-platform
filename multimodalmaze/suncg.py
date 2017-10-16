@@ -394,7 +394,10 @@ class ModelCategoryMapping(object):
             print "'%s':'%s'," % (c, name)
     
     def getFineGrainedCategoryForModelId(self, modelId):
-        return ModelCategoryMapping.fineMapping[str(modelId)]
+        return self.fine_grained_class[str(modelId)]
+    
+    def getCoarseGrainedCategoryForModelId(self, modelId):
+        return self.coarse_grained_class[str(modelId)]
     
     def getFineGrainedClassList(self):
         return sorted(set(self.fine_grained_class.values()))
