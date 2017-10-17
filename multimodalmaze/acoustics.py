@@ -24,18 +24,27 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 # POSSIBILITY OF SUCH DAMAGE.
 
+import os
 import scipy.io
 import logging
 import numpy as np
 import matplotlib.pyplot as plt
 
 from scipy import signal
+from string import digits
 from evert import Room, Source, Listener, Vector3, Matrix3, Polygon, PathSolution
 
-from multimodalmaze.rendering import get3DTrianglesFromModel
-from panda3d.core import Vec3, Mat4, CS_zup_right, CS_yup_right, LoaderOptions, Filename, NodePath, Loader, ClockObject
+from multimodalmaze.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
+
+from panda3d.core import AmbientLight, LVector3f, VBase4, Mat4, CS_zup_right, CS_yup_right, ClockObject, \
+                         Material, PointLight, LineStream, SceneGraphAnalyzer
+
+from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
+                         Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
 
 logger = logging.getLogger(__name__)
+
+MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "models")
 
 class AcousticWorld(object):
 
@@ -160,6 +169,76 @@ class CipicHRTF(HRTF):
                 impulses[i, j, 1, :] = hrirRight[:, i, j]
 
         return impulses
+    
+class TextureAbsorptionTable(object):
+    
+    textures = {
+        "default":['hard surfaces', 'average'],
+        "beam":['hard surfaces', 'average'],
+        "bricks":['hard surfaces', 'walls rendered brickwork'],
+        "carpet":['floor coverings', 'soft carpet'],
+        "decorstone":['hard surfaces', 'limestone walls'],
+        "facing_stone":['hard surfaces', 'ceramic tiles with a smooth surface'],
+        "grass":['floor coverings', 'hairy carpet'],
+        "ground":['hard surfaces', 'average'],
+        "laminate":['floor coverings', 'linoleum, asphalt, rubber, or cork tile on concrete'],
+        "leather":['curtains', 'cotton curtains'],
+        "linen":['curtains', 'cotton curtains'],
+        "lnm":['floor coverings', 'linoleum, asphalt, rubber, or cork tile on concrete'],
+        "paneling":['wood', 'thin plywood panelling'],  
+        "path":['hard surfaces', 'concrete'],
+        "potang":['linings', 'wooden lining'],
+        "prkt":['wood', "stage floor"],
+        "solo":['wood', "wood, 1.6 cm thick"],
+        "stone":['hard surfaces', 'concrete'],
+        "stucco":['linings', 'plasterboard on steel frame'],
+        "textile":['curtains', 'cotton curtains'],
+        "tile":['hard surfaces', 'ceramic tiles with a smooth surface'],
+        "wallp":['linings', 'plasterboard on steel frame'],
+        "wood":['wood', "wood, 1.6 cm thick"],
+        }
+    
+    @staticmethod
+    def getMeanAbsorptionCoefficientsFromModel(model, units='dB'):
+        
+        # Get the list of materials
+        areas, _, _, textures = getColorAttributesFromModel(model)
+
+        totalCoefficients = np.zeros(len(MaterialAbsorptionTable.frequencies))
+        for area, texture in zip(areas, textures):
+            
+            if texture is None:
+                texture = 'default'
+            else:
+                # Remove any digits
+                texture = texture.translate(None, digits)
+                
+                # Remove trailing underscores
+                texture = texture.rstrip("_")
+                
+                #NOTE: handle many variations of textile and wood in SUNCG texture names
+                if "textile" in texture:
+                    texture = "textile"
+                if "wood" in texture:
+                    texture = "wood"
+                    
+            if texture in TextureAbsorptionTable.textures:
+                category, material = TextureAbsorptionTable.textures[texture]
+                coefficients, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material, units='normalized')
+                totalCoefficients += area * coefficients
+            else:
+                raise Exception('Unsupported texture basename for material acoustics: %s' % (texture))
+        
+        if units == 'dB':
+            eps = np.finfo(np.float).eps
+            totalCoefficients = 20.0 * np.log10(1.0 - coefficients + eps)
+        elif units == 'normalized':
+            # Nothing to do
+            pass
+        else:
+            raise Exception('Unsupported units: %s' % (units))
+            
+        return totalCoefficients
     
 class MaterialAbsorptionTable(object):
     
@@ -321,7 +400,7 @@ class MaterialAbsorptionTable(object):
             ]
     
     @staticmethod
-    def getAbsorptionCoefficients(category, material):
+    def getAbsorptionCoefficients(category, material, units='dB'):
         
         category = category.lower().strip()
         if category not in MaterialAbsorptionTable.categories:
@@ -336,10 +415,16 @@ class MaterialAbsorptionTable(object):
         coefficients = np.array(MaterialAbsorptionTable.table[categoryIdx][materialIdx])
         frequencies = np.array(AirAttenuationTable.frequencies)
         
-        eps = np.finfo(np.float).eps
-        coefficientsDb = 20.0 * np.log10(1.0 - coefficients + eps)
-        
-        return coefficientsDb, frequencies
+        if units == 'dB':
+            eps = np.finfo(np.float).eps
+            coefficients = 20.0 * np.log10(1.0 - coefficients + eps)
+        elif units == 'normalized':
+            # Nothing to do
+            pass
+        else:
+            raise Exception('Unsupported units: %s' % (units))
+            
+        return coefficients, frequencies
     
 class AirAttenuationTable(object):
     
@@ -447,18 +532,48 @@ class FilterBank(object):
     
 class EvertAcousticWorld(AcousticWorld):
 
-    materials = [   # category,         # material name          # index
-                    ['hard surfaces',   'average'           ],   #   0
-                    ['hard surfaces',   'concrete'          ],   #   1
-                    ['glazing',         'glass window'      ],   #   2
-                    ['wood',            'wood, 1.6 cm thick'],   #   3
-                    ['floor coverings', 'linoleum'          ],   #   4
-                    ['floor coverings', 'soft carpet'       ],   #   5
-                    ['curtains',        'cotton curtains'   ],   #   6
-                ]
+    openedDoorModelIds = [
+                            '122', 
+                            '133', 
+                            '214', 
+                            '246', 
+                            '247', 
+                            '361', 
+                            '73',
+                            '756',
+                            '757',
+                            '758',
+                            '759',
+                            '760',
+                            '761',
+                            '762',
+                            '763',
+                            '764',
+                            '765',
+                            '768',
+                            '769',
+                            '770',
+                            '771',
+                            '778',
+                            '779',
+                            '780',
+                            's__1762',
+                            's__1763',
+                            's__1764',
+                            's__1765',
+                            's__1766',
+                            's__1767',
+                            's__1768',
+                            's__1769',
+                            's__1770',
+                            's__1771',
+                            's__1772',
+                            's__1773',
+                        ]
 
     def __init__(self, samplingRate=16000, maximumOrder=3, 
-                 materialAbsorption=True, frequencyDependent=True):
+                 materialAbsorption=True, frequencyDependent=True,
+                 size=(512,512), showCeiling=True):
 
         self.samplingRate = samplingRate
         self.maximumOrder = maximumOrder
@@ -474,12 +589,108 @@ class EvertAcousticWorld(AcousticWorld):
                                      samplingRate=samplingRate)
         
         #TODO: add infinite ground plane?
-        
-        #TODO: render some debug information (solution paths as rays)
-        self.debugNodePath = None
 
         self.setAirConditions()
+        self.coefficientsForMaterialId = []
         
+        # Rendering attributes
+        self.size = size
+        self.showCeiling = showCeiling
+        self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+        self.loader = Loader.getGlobalPtr()
+        self.graphicsEngine.setDefaultLoader(self.loader)
+        
+        self.render = NodePath('render')
+        self.render.setAttrib(RescaleNormalAttrib.makeDefault())
+        self.render.setTwoSided(0)
+        
+        selection = GraphicsPipeSelection.getGlobalPtr()
+        self.pipe = selection.makeDefaultPipe()
+        logger.debug('Using %s' % (self.pipe.getInterfaceName()))
+        
+        self.camera = self.render.attachNewNode(ModelNode('camera'))
+        self.camera.node().setPreserveTransform(ModelNode.PTLocal)
+        
+        self.scene = self.render.attachNewNode('scene')
+        self.scene.setTextureOff(1)
+        
+        self._initRgbCapture()
+        self._addDefaultLighting()
+    
+    def _initRgbCapture(self):
+
+        camNode = Camera('RGB camera')
+        lens = PerspectiveLens()
+        lens.setAspectRatio(1.0)
+        #lens.setNear(5.0)
+        #lens.setFar(500.0)
+        camNode.setLens(lens)
+        camNode.setScene(self.render)
+        cam = self.camera.attachNewNode(camNode)
+        
+        winprops = WindowProperties.getDefault()
+        winprops = WindowProperties(winprops)
+        winprops.setSize(self.size[0], self.size[1])
+        fbprops = FrameBufferProperties.getDefault()
+        fbprops = FrameBufferProperties(fbprops)
+        fbprops.setRgbColor(1)
+        fbprops.setColorBits(24)
+        fbprops.setAlphaBits(8)
+        fbprops.setDepthBits(1) 
+        flags = GraphicsPipe.BFFbPropsOptional | GraphicsPipe.BFRefuseWindow
+        buf = self.graphicsEngine.makeOutput(self.pipe, 'RGB buffer', 0, fbprops,
+                                             winprops, flags)
+        
+        dr = buf.makeDisplayRegion()
+        dr.setSort(0)
+        dr.setCamera(cam)
+        dr = camNode.getDisplayRegion(0)
+        
+        tex = Texture()
+        tex.setFormat(Texture.FRgb)
+        buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
+        
+        self.rgbBuffer = buf
+        self.rgbTex = tex    
+        
+    def _addDefaultLighting(self):
+        alight = AmbientLight('alight')
+        alight.setColor(VBase4(0.2, 0.2, 0.2, 1))
+        alnp = self.scene.attachNewNode(alight)
+        self.scene.setLight(alnp)
+        
+        plight = PointLight('plight')
+        plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
+        plnp = self.camera.attachNewNode(plight)
+        self.scene.setLight(plnp)
+        
+    def destroy(self):
+        self.graphicsEngine.removeAllWindows()
+        del self.pipe
+
+    def setCamera(self, mat):
+        mat = Mat4(*mat.ravel())
+        self.camera.setMat(mat)
+
+    def getRgbImage(self, channelOrder="RGBA"):
+        data = self.rgbTex.getRamImageAs(channelOrder)
+        image = np.frombuffer(data.get_data(), np.uint8)
+        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
+        image = np.flipud(image)
+        return image
+    
+    def _renderInfo(self):
+        sga = SceneGraphAnalyzer()
+        sga.addNode(self.render.node())
+        
+        ls = LineStream()
+        sga.write(ls)
+        desc = []
+        while ls.isTextAvailable():
+            desc.append(ls.getLine())
+        desc = '\r'.join(desc)
+        return desc
+    
     def _loadModel(self, modelPath):
         loader = Loader.getGlobalPtr()
         loaderOptions = LoaderOptions()
@@ -525,9 +736,8 @@ class EvertAcousticWorld(AcousticWorld):
         if self.materialAbsorption:
             for polygon in path.m_polygons:
                 materialId = polygon.getMaterialId()
-                category, material = EvertAcousticWorld.materials[materialId]
-                materialAbsoption, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material)
-                materialAttenuations += materialAbsoption
+                materialAbsorption = self.coefficientsForMaterialId[materialId]
+                materialAttenuations += materialAbsorption
         
         # Total attenuation (dB)
         attenuation = airAttenuations + distanceAttenuations + materialAttenuations
@@ -651,67 +861,139 @@ class EvertAcousticWorld(AcousticWorld):
                 
     def addObjectToScene(self, obj, mode='bbox'):
 
-        #TODO: implement function
+        node = self.scene.attachNewNode('object-' + str(obj.instanceId))
+        if not obj.modelId in self.openedDoorModelIds:
 
-        # Load model from file
-        model = self._loadModel(obj.modelFilename)
-        
-        if obj.transform is not None:
-            # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-            transformMat = Mat4(*obj.transform.ravel())
-            yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-            zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-            model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
+            # Load model from file
+            model = self._loadModel(obj.modelFilename)
             
-        if mode == 'exact':
-            # Use exact triangle mesh approximation
+            coefficients = TextureAbsorptionTable.getMeanAbsorptionCoefficientsFromModel(model, units='normalized')
+            materialId = len(self.coefficientsForMaterialId)
+            self.coefficientsForMaterialId.append(coefficients)
+            
+            if obj.transform is not None:
+                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
+                transformMat = Mat4(*obj.transform.ravel())
+                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
+                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
+    
+            if mode == 'exact':
+                # Nothing to do
+                pass
+            elif mode == 'bbox':
+                # Bounding box approximation
+                minRefBounds, maxRefBounds = model.getTightBounds()
+                refDims = maxRefBounds - minRefBounds
+                refPos = model.getPos()
+                refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
+                refDeltaCenter = refCenter - refPos
+                
+                model.removeNode()
+                model = self._loadModel(os.path.join(MODEL_DATA_DIR, 'cube.egg')) 
+                
+                # Rescale the cube model to match the bounding box of the original model
+                minBounds, maxBounds = model.getTightBounds()
+                dims = maxBounds - minBounds
+                pos = model.getPos()
+                center = minBounds + (maxBounds - minBounds) / 2.0
+                deltaCenter = center - pos
+                
+                position = refPos + refDeltaCenter - deltaCenter
+                model.setPos(position)
+                
+                scale = LVector3f(refDims.x/dims.x, refDims.y/dims.y, refDims.z/dims.z)
+                model.setScale(scale)
+                
+                # Validate approximation
+                eps = 1e-4
+                minBounds, maxBounds = model.getTightBounds()
+                center = minBounds + (maxBounds - minBounds) / 2.0
+                dims = maxBounds - minBounds
+                assert np.allclose([dims.x, dims.y, dims.z], 
+                                   [refDims.x, refDims.y, refDims.z], 
+                                   atol=eps)
+                assert np.allclose([center.x, center.y, center.z], 
+                                   [refCenter.x, refCenter.y, refCenter.z], 
+                                   atol=eps)
+                assert np.allclose([minBounds.x, minBounds.y, minBounds.z], 
+                                   [minRefBounds.x, minRefBounds.y, minRefBounds.z], 
+                                   atol=eps)
+                assert np.allclose([maxBounds.x, maxBounds.y, maxBounds.z], 
+                                   [maxRefBounds.x, maxRefBounds.y, maxRefBounds.z], 
+                                   atol=eps)
+            else:
+                raise Exception('Unknown mode type for acoustic object shape: %s' % (mode))
+        
+            model.reparentTo(node)
+            
+            material = Material()
+            intensity = np.mean(1.0 - coefficients)
+            material.setAmbient((intensity, intensity, intensity, 1))
+            material.setDiffuse((intensity, intensity, intensity, 1))
+            model.clearMaterial()
+            model.setMaterial(material, 1)
+    
+            # Add polygons to EVERT engine
             polygons = getAcousticPolygonsFromModel(model)
-        elif mode == 'bbox':
-            # Bounding box approximation
-            minBounds, maxBounds = model.getTightBounds()
-            dims = maxBounds - minBounds
-            Vec3(dims.x/2, dims.y/2, dims.z/2)
-        else:
-            raise Exception('Unknown mode type for physic object collision shape: %s' % (mode))
+            for polygon in polygons:
+                polygon.setMaterialId(materialId)
+                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
     
-        #nodePath = self.render.attachNewNode(node)
-        #nodePath.setMat(model.getMat())
-    
-        model.detachNode()
+        return node
     
     def addRoomToScene(self, room):
 
-        nodes = []
+        node = self.scene.attachNewNode('room-' + str(room.instanceId))
         for modelFilename in room.modelFilenames:
-            #partId = os.path.splitext(os.path.basename(modelFilename))[0]
             
-            # Load all polygons from model geometry in the engine
+            partId = os.path.splitext(os.path.basename(modelFilename))[0]
+            objNode = node.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
             model = self._loadModel(modelFilename)
+            model.reparentTo(objNode)
+            
+            if not self.showCeiling and 'c' in os.path.basename(modelFilename):
+                objNode.hide()
+            
+            coefficients = TextureAbsorptionTable.getMeanAbsorptionCoefficientsFromModel(model, units='normalized')
+            materialId = len(self.coefficientsForMaterialId)
+            self.coefficientsForMaterialId.append(coefficients)
+            
+            material = Material()
+            intensity = np.mean(1.0 - coefficients)
+            material.setAmbient((intensity, intensity, intensity, 1))
+            material.setDiffuse((intensity, intensity, intensity, 1))
+            model.clearMaterial()
+            model.setMaterial(material, 1)
+            
+            # Add polygons to EVERT engine
             polygons = getAcousticPolygonsFromModel(model)
             for polygon in polygons:
+                polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
-            
-            #np = self.render.attachNewNode(model)
-            model.detachNode()
                 
         for obj in room.objects:
-            node = self.addObjectToScene(obj)
-            nodes.append(node)
-
-        return nodes
+            
+            # Ignore doors
+            
+            objNode = self.addObjectToScene(obj)
+            objNode.reparentTo(node)
+            
+        return node
 
     def addHouseToScene(self, house):
 
-        nodes = []
+        node = self.scene.attachNewNode('house-' + str(house.instanceId))
+    
         for room in house.rooms:
-            roomNodes = self.addRoomToScene(room)
-            nodes.extend(roomNodes)
+            roomNode = self.addRoomToScene(room)
+            roomNode.reparentTo(node)
         
         for obj in house.objects:
             objNode = self.addObjectToScene(obj)
-            nodes.append(objNode)
-            
-        return nodes
+            objNode.reparentTo(node)
+        
+        return node
     
     def updateBSP(self):
         self.world.constructBSP()
@@ -737,6 +1019,20 @@ class EvertAcousticWorld(AcousticWorld):
         # Update solutions
         for solution in self.solutions:
             solution.update()
+        
+        #NOTE: we may need to call frame rendering twice because of double-buffering
+        self.graphicsEngine.renderFrame()
             
     def resetScene(self):
-        pass
+        # FIXME: find out why this function outputs a lot of logs to STDERR 
+        childNodes = self.scene.ls()
+        if childNodes is not None:
+            for node in childNodes:
+                node.detachNode()
+                node.removeNode()
+        self.scene.clearLight()
+        self.scene.clearShader()
+        self.scene.detachNode()
+        self.scene.removeNode()
+        self.scene = self.render.attachNewNode('scene')
+        

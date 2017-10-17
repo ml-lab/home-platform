@@ -9,12 +9,13 @@ Main requirements:
 - Python 2.7 with Numpy, Scipy and Matplotlib
 - [Panda3d](https://www.panda3d.org/) game engine for 3D rendering
 - [EVERT](https://github.com/sbrodeur/evert) engine for 3D acoustic ray-tracing
+- [PySoundFile](https://github.com/bastibe/PySoundFile) for Ogg Vorbis decoding
 
 To install dependencies on Ubuntu operating systems:
 ```
-sudo apt-get install python-pip python-dev build-essential
+sudo apt-get install python-pip python-dev build-essential libsndfile1
 sudo pip install --upgrade pip
-sudo pip install --upgrade numpy scipy matplotlib panda3d
+sudo pip install --upgrade numpy scipy matplotlib panda3d pysoundfile
 ```
 ## Installing the library
 

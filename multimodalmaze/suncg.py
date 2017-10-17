@@ -30,6 +30,12 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
       
+def ignoreVariant(modelId):
+    suffix = "_0"
+    if modelId.endswith(suffix):
+        modelId =  modelId[:len(modelId) - len(suffix)]
+    return modelId
+      
 class ModelInformation(object):
 
     header = 'id,front,nmaterials,minPoint,maxPoint,aligned.dims,index,variantIds'
@@ -64,8 +70,8 @@ class ModelInformation(object):
                                                  'aligned_dims':aligned_dims,
                                                  'variantIds':variantIds}
 
-    def getModelInfo(self, model_id):
-        return self.model_info[model_id]
+    def getModelInfo(self, modelId):
+        return self.model_info[ignoreVariant(modelId)]
 
 class ModelCategoryMapping(object):
 
@@ -394,10 +400,10 @@ class ModelCategoryMapping(object):
             print "'%s':'%s'," % (c, name)
     
     def getFineGrainedCategoryForModelId(self, modelId):
-        return self.fine_grained_class[str(modelId)]
+        return self.fine_grained_class[ignoreVariant(modelId)]
     
     def getCoarseGrainedCategoryForModelId(self, modelId):
-        return self.coarse_grained_class[str(modelId)]
+        return self.coarse_grained_class[ignoreVariant(modelId)]
     
     def getFineGrainedClassList(self):
         return sorted(set(self.fine_grained_class.values()))
