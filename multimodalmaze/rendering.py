@@ -202,7 +202,7 @@ class Panda3dRenderWorld(RenderWorld):
         desc = []
         while ls.isTextAvailable():
             desc.append(ls.getLine())
-        desc = '\r'.join(desc)
+        desc = '\n'.join(desc)
         return desc
         
     def _loadModel(self, modelPath):
@@ -343,6 +343,12 @@ def get3DPointsFromModel(model):
     return np.array(pts)
     
 def get3DTrianglesFromModel(model):
+    
+    # Calculate the net transformation
+    transform = model.getNetTransform()
+    transformMat = transform.getMat()
+    
+    # Get geometry data from GeomNode instances inside the model
     geomNodes = model.findAllMatches('**/+GeomNode')
     
     triangles = []
@@ -373,13 +379,19 @@ def get3DTrianglesFromModel(model):
                         vi = prim.getVertex(i)
                         vertex.setRow(vi)
                         v = vertex.getData3f()
+                        
+                        # Apply transformation
+                        v = transformMat.xformPoint(v)
+                        
                         triPts.append([v.x, v.y, v.z])
                         #print "prim %s has vertex %s: %s" % (p, vi, repr(v))
                     triangles.append(triPts)
             
-    return np.array(triangles)
+    triangles = np.array(triangles)
+            
+    return triangles
 
-def getSurfaceAreaFromGeom(geom):
+def getSurfaceAreaFromGeom(geom, transform=None):
     
     totalArea = 0.0
     for k in range(geom.getNumPrimitives()):
@@ -399,6 +411,11 @@ def getSurfaceAreaFromGeom(geom):
                 vi = prim.getVertex(i)
                 vertex.setRow(vi)
                 v = vertex.getData3f()
+                
+                # Apply transformation
+                if transform is not None:
+                    v = transform.xformPoint(v)
+                
                 triPts.append([v.x, v.y, v.z])
             triPts = np.array(triPts)
 
@@ -413,6 +430,11 @@ def getSurfaceAreaFromGeom(geom):
     return totalArea
 
 def getColorAttributesFromModel(model):
+    
+    # Calculate the net transformation
+    transform = model.getNetTransform()
+    transformMat = transform.getMat()
+    
     areas = []
     rgbColors = []
     textures = []
@@ -466,7 +488,7 @@ def getColorAttributesFromModel(model):
             transparencies.append(isTransparent)
         
             geom = geomNode.getGeom(n)
-            area = getSurfaceAreaFromGeom(geom)
+            area = getSurfaceAreaFromGeom(geom, transformMat)
             areas.append(area)
             textures.append(texture)
             

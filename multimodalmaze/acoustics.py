@@ -36,10 +36,10 @@ from evert import Room, Source, Listener, Vector3, Matrix3, Polygon, PathSolutio
 
 from multimodalmaze.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
 
-from panda3d.core import AmbientLight, LVector3f, VBase4, Mat4, CS_zup_right, CS_yup_right, ClockObject, \
+from panda3d.core import AmbientLight, LVector3f, LVecBase3, VBase4, Mat4, CS_zup_right, CS_yup_right, ClockObject, \
                          Material, PointLight, LineStream, SceneGraphAnalyzer
 
-from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
+from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, AntialiasAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
 
 logger = logging.getLogger(__name__)
@@ -68,36 +68,14 @@ class AcousticWorld(object):
 
     def step(self, time):
         pass
-    
-    def resetScene(self):
-        pass
-
-
-def getPolygonsFromBoundingBox(model):
-    
-    #TODO: implement function
-    
-    bottomLeft, topRight = model.getTightBounds()
-    length = topRight.x - bottomLeft.x
-    width = topRight.y - bottomLeft.y
-    height = topRight.z - bottomLeft.z
-    
-    face1poly = Polygon([Vector3(0,0,0), Vector3(0,width,0), Vector3(length,width,0), Vector3(length,0,0)])
-    face2poly = Polygon([Vector3(0,0,0), Vector3(0,width,0), Vector3(0,width,height), Vector3(0,0,height)])
-    face3poly = Polygon([Vector3(0,0,0), Vector3(length,0,0), Vector3(length,0,height), Vector3(0,0,height)])
-    face4poly = Polygon([Vector3(0,0,height), Vector3(0,width,height), Vector3(length,width,height), Vector3(length,0,height)])
-    face5poly = Polygon([Vector3(0,width,height), Vector3(0,width,0), Vector3(length,width,0), Vector3(length,width,height)])
-    face6poly = Polygon([Vector3(length,0,height), Vector3(length,width,height), Vector3(length,width,0), Vector3(length,0,0)])
-    polygons = [face1poly, face2poly, face3poly, face4poly, face5poly, face6poly]
-    
-    return polygons
 
 def getAcousticPolygonsFromModel(model):
     polygons = []
     for triangle in get3DTrianglesFromModel(model):
         pts = []
         for pt in triangle:
-            pts.append(Vector3(pt[0],pt[1],pt[2]))
+            #NOTE: EVERT works in milimeter units
+            pts.append(Vector3(pt[0]*1000.0,pt[1]*1000.0,pt[2]*1000.0))
         polygons.append(Polygon(pts))
     return polygons
     
@@ -448,7 +426,7 @@ class AirAttenuationTable(object):
             ]
     
     @staticmethod
-    def getAttenuations(distance, temperature, relativeHumidity):
+    def getAttenuations(distance, temperature, relativeHumidity, units='dB'):
         closestTemperatureIdx = np.argmin(np.sqrt((np.array(AirAttenuationTable.temperatures) - temperature)**2))
         closestHumidityIdx = np.argmin(np.sqrt((np.array(AirAttenuationTable.relativeHumidities) - relativeHumidity)**2))
         
@@ -457,9 +435,17 @@ class AirAttenuationTable(object):
         
         eps = np.finfo(np.float).eps
         attenuations = np.clip(distance * 1e-3 * attenuations, 0.0, 1.0 - eps)
-        attenuationsDb = 20.0 * np.log10(1.0 - attenuations)
         
-        return attenuationsDb, frequencies
+        if units == 'dB':
+            eps = np.finfo(np.float).eps
+            attenuations = 20.0 * np.log10(1.0 - attenuations + eps)
+        elif units == 'normalized':
+            # Nothing to do
+            pass
+        else:
+            raise Exception('Unsupported units: %s' % (units))
+        
+        return attenuations, frequencies
     
 class FilterBank(object):
     
@@ -530,46 +516,81 @@ class FilterBank(object):
             plt.subplots_adjust(hspace=0.5)
         return fig
     
+def getPathLength(path):
+    
+    # Calculate path length and corresponding delay
+    pathLength = 0.0
+    lastPt = path.m_points[0]
+    for pt in path.m_points[1:]:
+        pathLength += np.sqrt((lastPt.x - pt.x)**2 + 
+                              (lastPt.y - pt.y)**2 + 
+                              (lastPt.z - pt.z)**2)
+        lastPt = pt
+        
+    #NOTE: EVERT works in milimeter units
+    pathLength = pathLength / 1000.0 # mm to m
+    return pathLength
+    
+def getIntersectionPointsFromPath(path):
+    pts = []
+    epts = path.m_points
+    for i in range(len(epts)):
+        if i > 0:
+            segLength = np.sqrt((epts[i-1].x - epts[i].x)**2 + 
+                                (epts[i-1].y - epts[i].y)**2 + 
+                                (epts[i-1].z - epts[i].z)**2)
+        
+            # Skip duplicated points
+            if segLength == 0.0: 
+                continue
+            
+        #NOTE: EVERT works in milimeter units        
+        pts.append(LVector3f(epts[i].x / 1000.0, epts[i].y / 1000.0, epts[i].z / 1000.0))
+    return pts
+    
+def getIntersectedMaterialIdsFromPath(path):
+    
+    polygons = []
+    lastPt = path.m_points[0]
+    for i, pt in enumerate(path.m_points[1:]):
+        segLength = np.sqrt((lastPt.x - pt.x)**2 + 
+                            (lastPt.y - pt.y)**2 + 
+                            (lastPt.z - pt.z)**2)
+        
+        # Skip duplicated points
+        if segLength == 0.0: continue
+        
+        if i >= 2:
+            polygons.append(path.m_polygons[i-2])
+        lastPt = pt
+    
+    materialIds = []
+    for polygon in polygons:
+        materialIds.append(polygon.getMaterialId())
+    
+    return materialIds
+
 class EvertAcousticWorld(AcousticWorld):
 
+    # NOTE: the model ids of objects that correspond to opened doors. They will be ignored in the acoustic scene.
     openedDoorModelIds = [
-                            '122', 
-                            '133', 
-                            '214', 
-                            '246', 
-                            '247', 
-                            '361', 
-                            '73',
-                            '756',
-                            '757',
-                            '758',
-                            '759',
-                            '760',
-                            '761',
-                            '762',
-                            '763',
-                            '764',
-                            '765',
-                            '768',
-                            '769',
-                            '770',
-                            '771',
-                            '778',
-                            '779',
-                            '780',
-                            's__1762',
-                            's__1763',
-                            's__1764',
-                            's__1765',
-                            's__1766',
-                            's__1767',
-                            's__1768',
-                            's__1769',
-                            's__1770',
-                            's__1771',
-                            's__1772',
-                            's__1773',
-                        ]
+                            '122', '133', '214', '246', '247', '361', '73','756','757','758','759','760',
+                            '761','762','763','764','765', '768','769','770','771','778','779','780',
+                            's__1762','s__1763','s__1764','s__1765','s__1766','s__1767','s__1768','s__1769',
+                            's__1770','s__1771','s__1772','s__1773',
+                         ]
+
+    rayColors = [
+                    (1.0, 1.0, 0.0, 0.2), # yellow
+                    (0.0, 0.0, 1.0, 0.2), # blue
+                    (0.0, 0.0, 1.0, 0.2), # green
+                    (0.0, 1.0, 1.0, 0.2), # cyan
+                    (1.0, 0.0, 1.0, 0.2), # magenta
+                    (1.0, 0.0, 0.0, 0.2), # red
+                ]
+
+    minRayRadius = 0.01
+    maxRayRadius = 0.1
 
     def __init__(self, samplingRate=16000, maximumOrder=3, 
                  materialAbsorption=True, frequencyDependent=True,
@@ -593,6 +614,15 @@ class EvertAcousticWorld(AcousticWorld):
         self.setAirConditions()
         self.coefficientsForMaterialId = []
         
+        self._initRender(size, showCeiling)
+        
+        self.agents = []
+        self.listenerNodesByInstanceId = dict()
+    
+        self.sources = []
+        self.evertSourcesByInstanceId = dict()
+    
+    def _initRender(self, size, showCeiling):
         # Rendering attributes
         self.size = size
         self.showCeiling = showCeiling
@@ -602,7 +632,9 @@ class EvertAcousticWorld(AcousticWorld):
         
         self.render = NodePath('render')
         self.render.setAttrib(RescaleNormalAttrib.makeDefault())
-        self.render.setTwoSided(0)
+        self.render.setTwoSided(1)
+        self.render.setAntialias(AntialiasAttrib.MAuto)
+        self.render.setTextureOff(1)
         
         selection = GraphicsPipeSelection.getGlobalPtr()
         self.pipe = selection.makeDefaultPipe()
@@ -612,18 +644,18 @@ class EvertAcousticWorld(AcousticWorld):
         self.camera.node().setPreserveTransform(ModelNode.PTLocal)
         
         self.scene = self.render.attachNewNode('scene')
-        self.scene.setTextureOff(1)
         
         self._initRgbCapture()
         self._addDefaultLighting()
-    
+        self._preloadRayModels()
+        
     def _initRgbCapture(self):
 
         camNode = Camera('RGB camera')
         lens = PerspectiveLens()
         lens.setAspectRatio(1.0)
-        #lens.setNear(5.0)
-        #lens.setFar(500.0)
+        lens.setNear(0.1)
+        lens.setFar(1000.0)
         camNode.setLens(lens)
         camNode.setScene(self.render)
         cam = self.camera.attachNewNode(camNode)
@@ -659,6 +691,7 @@ class EvertAcousticWorld(AcousticWorld):
         alnp = self.scene.attachNewNode(alight)
         self.scene.setLight(alnp)
         
+        #NOTE: Point light following the camera
         plight = PointLight('plight')
         plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
         plnp = self.camera.attachNewNode(plight)
@@ -688,7 +721,7 @@ class EvertAcousticWorld(AcousticWorld):
         desc = []
         while ls.isTextAvailable():
             desc.append(ls.getLine())
-        desc = '\r'.join(desc)
+        desc = '\n'.join(desc)
         return desc
     
     def _loadModel(self, modelPath):
@@ -700,6 +733,40 @@ class EvertAcousticWorld(AcousticWorld):
         else:
             raise IOError('Could not load model file: %s' % (modelPath))
         return nodePath
+    
+    def _loadSphereModel(self, refCenter, radius, color=(1.0,0.0,0.0,1.0)):
+    
+        model = self._loadModel(os.path.join(MODEL_DATA_DIR, 'sphere.egg')) 
+        
+        # Rescale the cube model to match the bounding box of the original model
+        minBounds, maxBounds = model.getTightBounds()
+        dims = maxBounds - minBounds
+        pos = model.getPos()
+        center = minBounds + (maxBounds - minBounds) / 2.0
+        deltaCenter = center - pos
+        
+        position = refCenter - deltaCenter
+        model.setPos(position)
+        
+        scale = LVector3f(radius/dims.x, radius/dims.y, radius/dims.z)
+        model.setScale(scale)
+        
+        # Validate approximation
+        eps = 1e-4
+        minBounds, maxBounds = model.getTightBounds()
+        center = minBounds + (maxBounds - minBounds) / 2.0
+        dims = maxBounds - minBounds
+        assert np.allclose([center.x, center.y, center.z], 
+                           [refCenter.x, refCenter.y, refCenter.z], 
+                           atol=eps)
+        
+        material = Material()
+        material.setAmbient(color)
+        material.setDiffuse(color)
+        model.clearMaterial()
+        model.setMaterial(material, 1)
+        
+        return model
     
     def setAirConditions(self, pressureAtm=1.0, temperature=20.0, relativeHumidity=65.0):
         self.pressureAtm = pressureAtm
@@ -714,19 +781,11 @@ class EvertAcousticWorld(AcousticWorld):
     
     def _calculateDelayAndAttenuation(self, path):
         
-        # Calculate path length and corresponding delay
-        pathLength = 0.0
-        lastPt = path.m_points[0]
-        for pt in path.m_points[1:]:
-            pathLength += np.sqrt((lastPt.x - pt.x)**2 + 
-                                  (lastPt.y - pt.y)**2 + 
-                                  (lastPt.z - pt.z)**2)
-            lastPt = pt
-        pathLength = pathLength / 1000.0 # mm to m
+        pathLength = getPathLength(path)
         delay = pathLength/self._calculateSoundSpeed()
         
         # Calculate air attenuation coefficient (dB)
-        airAttenuations, frequencies = AirAttenuationTable.getAttenuations(pathLength, self.temperature, self.relativeHumidity)
+        airAttenuations, frequencies = AirAttenuationTable.getAttenuations(pathLength, self.temperature, self.relativeHumidity, units='dB')
 
         # Calculate spherical geometric spreading attenuation (dB)
         distanceAttenuations = 20.0 * np.log10(1.0/pathLength)
@@ -734,16 +793,196 @@ class EvertAcousticWorld(AcousticWorld):
         # Calculat material attenuation (dB)
         materialAttenuations = np.zeros((len(MaterialAbsorptionTable.frequencies),))
         if self.materialAbsorption:
-            for polygon in path.m_polygons:
-                materialId = polygon.getMaterialId()
+            for materialId in getIntersectedMaterialIdsFromPath(path):
                 materialAbsorption = self.coefficientsForMaterialId[materialId]
-                materialAttenuations += materialAbsorption
+                eps = np.finfo(np.float).eps
+                materialAbsorptionDb = 20.0 * np.log10(1.0 - materialAbsorption + eps)
+                materialAttenuations += materialAbsorptionDb
         
         # Total attenuation (dB)
         attenuation = airAttenuations + distanceAttenuations + materialAttenuations
+        #assert np.all(attenuation < 0.0)
          
         return delay, attenuation, frequencies
     
+    def _preloadRayModels(self, initialCacheSize=256):
+        
+        self.rays = []
+        self.nbUsedRays = 0
+        
+        # Load cylinder model and calculate the scaling factor to make the model unit-norm over the Z axis
+        model = self._loadModel(os.path.join(MODEL_DATA_DIR, 'cylinder.egg'))
+        minBounds, maxBounds = model.getTightBounds()
+        dims = maxBounds - minBounds
+        self.rayModelZScaling = 1.0/dims.z
+        model.removeNode()
+        
+        self.rayGroupNode = self.scene.attachNewNode('rays')
+        self.rayGroupNode.reparentTo(self.scene)
+
+        self._resizeRayCache(initialCacheSize)
+        
+    def _resizeRayCache(self, size):
+        
+        if size < len(self.rays):
+            # Remove unused rays from the cache
+            for model in self.rays[size:]:
+                model.detachNode()
+                model.removeNode()
+                
+            self.rays = self.rays[:size]
+        else:
+            # Add new rays to the cache
+            for _ in range(size - len(self.rays)):
+                
+                # Load cylinder model
+                model = self._loadModel(os.path.join(MODEL_DATA_DIR, 'cylinder.egg'))
+                model.clearMaterial()
+                model.reparentTo(self.rayGroupNode)
+                model.hide()
+                
+                self.rays.append(model)
+    
+    def _updateRayModelFromEndpoints(self, model, startPt, endPt, radius, color):
+
+        # Clear previous transform
+        model.clearMat()
+            
+        # Reference length and center position of ray
+        refLength = np.sqrt( (endPt.x - startPt.x)**2 + 
+                             (endPt.y - startPt.y)**2 + 
+                             (endPt.z - startPt.z)**2)
+        refCenter = (endPt + startPt)/2.0
+            
+        # Change orientation by calculating rotation angles from the endpoints
+        # NOTE: H angle is how the model rotates around the (0, 0, 1) axis,
+        #       P angle how much it rotates around the (1, 0, 0) axis, 
+        #       R angle how much it rotates around the (0, 1, 0) axis.
+        normVec = (endPt - startPt) / refLength
+        
+        # Rotation around X in the Y-Z plane
+        angle = np.pi/2 + np.arcsin(-normVec.z)
+        model.setHpr(0.0, angle*180/np.pi, 0.0)
+        transAroundX = model.getMat()
+        
+        # Rotation around Z in the X-Y plane
+        angle = np.pi/2 + np.arctan2(normVec.y, normVec.x)
+        model.setHpr(angle*180/np.pi, 0.0, 0.0)
+        transAroundZ = model.getMat()
+        
+        model.setMat(transAroundX * transAroundZ)
+        
+        # Move ray to reference center position
+        minBounds, maxBounds = model.getTightBounds()
+        center = minBounds + (maxBounds - minBounds) / 2.0
+        deltaCenter = center - model.getPos()
+        model.setPos(refCenter - deltaCenter)
+        
+        # Change radius based on attenuation
+        model.setScale((radius, radius, refLength * self.rayModelZScaling))
+        
+        # Change color
+        model.setColor(*color)
+            
+    def _calculateAttenuationPerSegment(self, path):
+        
+        pts = getIntersectionPointsFromPath(path)
+        
+        totalSegAttenuations = np.zeros((len(pts)-1,))
+        lastPt = pts[0]
+        cumLength = 0.0
+        for i, pt in enumerate(pts[1:]):
+            segLength = np.sqrt((lastPt.x - pt.x)**2 + 
+                                (lastPt.y - pt.y)**2 + 
+                                (lastPt.z - pt.z)**2)
+            assert segLength > 0.0
+        
+            # Calculate air attenuation coefficient (dB)
+            airAttenuations, _ = AirAttenuationTable.getAttenuations(segLength, self.temperature, self.relativeHumidity, units='dB')
+    
+            # Calculate spherical geometric spreading attenuation (dB)
+            if i > 0:
+                distanceAttenuationsRef = 20.0 * np.log10(1.0/cumLength)
+                distanceAttenuations = 20.0 * np.log10(1.0/(cumLength+segLength))
+                distanceAttenuations = distanceAttenuations - distanceAttenuationsRef
+            else:
+                distanceAttenuations = 20.0 * np.log10(1.0/segLength)
+            
+            if i == 0:
+                totalSegAttenuations[i] = np.mean(airAttenuations) + distanceAttenuations
+            else:
+                totalSegAttenuations[i] = totalSegAttenuations[i-1] + np.mean(airAttenuations) + distanceAttenuations
+                
+            cumLength += segLength
+            lastPt = pt
+        
+        # Calculate material attenuation (dB)
+        if self.materialAbsorption:
+            for i, materialId in enumerate(getIntersectedMaterialIdsFromPath(path)):
+                materialAbsorption = self.coefficientsForMaterialId[materialId]
+                eps = np.finfo(np.float).eps
+                materialAbsorptionDb = 20.0 * np.log10(1.0 - materialAbsorption + eps)
+                totalSegAttenuations[i+1:] += np.mean(materialAbsorptionDb)
+        
+        #assert np.all(totalSegAttenuations < 0.0)
+        
+        return totalSegAttenuations
+        
+    def _renderAcousticPath(self, path, color):
+        
+        totalSegAttenuationsDb = self._calculateAttenuationPerSegment(path)
+        
+        # Make all attenuations relative to the shortest path
+        totalSegAttenuationsDb -= totalSegAttenuationsDb[0]
+        
+        pts = getIntersectionPointsFromPath(path)
+        startPt = pts[0]
+        for endPt, attenuationDb in zip(pts[1:], totalSegAttenuationsDb):
+            
+            coefficient = 10.0 ** (attenuationDb/20.0)
+            #assert coefficient >= 0.0 and coefficient <= 1.0
+            radius = np.clip(self.maxRayRadius * coefficient, a_min=self.minRayRadius, a_max=self.maxRayRadius)
+            
+            if self.nbUsedRays < len(self.rays):
+                model = self.rays[self.nbUsedRays]
+                self._updateRayModelFromEndpoints(model, startPt, endPt, radius, color)
+                model.show()
+                self.nbUsedRays += 1
+            else:
+                nextSize = 2 * len(self.rays)
+                logger.debug('Ray cache is full: increasing the size from %d to %d' % (len(self.rays), nextSize))
+                self._resizeRayCache(nextSize)
+                
+            startPt = endPt
+                    
+    def _renderAcousticSolutions(self):
+        
+        # Reset the number of used rays
+        self.nbUsedRays = 0
+        
+        # Draw each solution with a different color
+        for i, solution in enumerate(self.solutions):
+            
+            # Rotate amongst colors of the predefined table
+            color = EvertAcousticWorld.rayColors[i%len(EvertAcousticWorld.rayColors)]
+            
+            # Sort by increasing path lengh
+            paths = []
+            for i in range(solution.numPaths()):
+                path = solution.getPath(i)
+                pathLength = getPathLength(path)
+                paths.append((pathLength, path))
+            paths.sort(key=lambda x: x[0])
+            paths = [path for _, path in paths]
+            
+            # Draw each solution path
+            for path in paths:
+                self._renderAcousticPath(path, color)
+            
+        # Hide all unused rays in the cache
+        for i in range(self.nbUsedRays, len(self.rays)):
+            self.rays[i].hide()
+            
     def calculateImpulseResponse(self, solution, maxImpulseLength=1.0, threshold=120.0):
     
         impulse = np.zeros((int(maxImpulseLength * self.samplingRate),))
@@ -763,7 +1002,7 @@ class EvertAcousticWorld(AcousticWorld):
                     # Skip paths that would have their impulse responses truncated at the end
                     if delaySamples + self.filterbank.n < len(impulse):
                     
-                        linearGains = 1.0/np.exp(-attenuationsDb/20.0 * np.log(10.0))
+                        linearGains = 10.0 ** (attenuationsDb/20.0)
                         pathImpulse = self.filterbank.getScaledImpulseResponse(linearGains)
                             
                         startIdx = delaySamples - self.filterbank.n/2
@@ -780,84 +1019,128 @@ class EvertAcousticWorld(AcousticWorld):
                             realImpulseLength = endIdx+1
                 else:
                     # Use attenuation at 1000 Hz
-                    linearGain = 1.0/np.exp(-attenuationsDb[3]/20.0 * np.log(10.0))
+                    linearGain = 10.0 ** (attenuationsDb[3]/20.0)
                     impulse[delaySamples] += linearGain
                     if delaySamples+1 > realImpulseLength:
                         realImpulseLength = delaySamples+1
                 
         return impulse[:realImpulseLength]
     
-    def connectToRenderWorld(self, renderWorld):
+    def addStaticSourceToScene(self, obj, instanceId, radius=0.5, color=(1.0,0.0,0.0,1.0)):
 
-        #TODO: implement function
-
-        # Add debug node, if any
-        if self.debugNodePath is not None:
-            self.debugNodePath.reparentTo(renderWorld.render)
-
-        # Loop throught all acoustic-related nodepaths in graph
-        for acousticNodePath in self.render.getChildren():
+        node = self.scene.attachNewNode('object-' + str(obj.instanceId))
+        
+        # Load model for the sound source
+        sourceNode = self.scene.attachNewNode('acoustic-source-' + str(obj.instanceId))
+        sourceNode.reparentTo(self.scene)
+        if obj.modelFilename is not None:
+            model = self._loadModel(obj.modelFilename)
+            model.reparentTo(sourceNode)
             
-            # Find matching nodepath in render-related graph
-            name = acousticNodePath.getName()
-            renderNodePath = renderWorld.render.find('**/%s*' % (name))
-            if renderNodePath.getNumNodes() == 0:
-                raise Exception('Could not find matching nodepath for rendering: %s' % (name))
-            
-            # Reparent physic-related node to render graph
-            acousticNodePath.reparentTo(renderNodePath)
-            #renderNodePath.reparentTo(acousticNodePath)
-    
-    def addStaticSourceToScene(self, position, instanceId):
-
-        #TODO: implement function
-
-        # Create source localized in room
+            if obj.transform is not None:
+                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
+                transformMat = Mat4(*obj.transform.ravel())
+                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
+                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
+        else:
+            transformMat = Mat4(*obj.transform.ravel())
+            refCenter = transformMat.getCol3(3)
+            model = self._loadSphereModel(refCenter, radius, color)
+            model.reparentTo(sourceNode)
+        
+        # Bounding box approximation
+        minRefBounds, maxRefBounds = model.getTightBounds()
+        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
+        
+        # Create source in EVERT
         src = Source()
-        src.setPosition(Vector3(position[0],position[1], position[2]))
-        src.setOrientation(Matrix3(0,0,1,
-                                    1,0,0,
-                                    0,1,0))
+        srcNetTans = model.getNetTransform().getMat()
+        #srcNetPos = srcNetTans.getRow3(3)
+        srcNetMat = srcNetTans.getUpper3()
+        src.setPosition(Vector3(refCenter.x * 1000.0, refCenter.y * 1000.0, refCenter.z * 1000.0)) # m to mm
+        src.setOrientation(Matrix3(srcNetMat.getCell(0,0), srcNetMat.getCell(0,1), srcNetMat.getCell(0,2),
+                                   srcNetMat.getCell(1,0), srcNetMat.getCell(1,1), srcNetMat.getCell(1,2),
+                                   srcNetMat.getCell(2,0), srcNetMat.getCell(2,1), srcNetMat.getCell(2,2)))
         src.setName(str(instanceId) + '-src')
         self.world.addSource(src)
-    
-    def addMicrophoneToScene(self, position, instanceId):
         
-        #TODO: implement function
+        self.sources.append(obj)
+        self.evertSourcesByInstanceId[obj.instanceId] = [src,]
         
-        # Add listener
-        lst = Listener()
-        lst.setPosition(Vector3(position[0], position[1], position[2]))
-        lst.setOrientation(Matrix3(0,0,-1,
-                                   -1,0,0,
-                                   0,1,0))
-        lst.setName(str(instanceId) + '-lst-left')
-        self.world.addListener(lst)
+        return node
     
-    def addAgentToScene(self, agent, radius=0.25, height=1.6):
+    def addAgentToScene(self, agent, interauralDistance=0.25):
         
         #TODO: for binaural, add a plane between the two listeners to mimick head-related occlusion?
         #      The problem is that accounts for a moving polygon, which doesn't fit with the precomputed
-        #      beam search tree. But we could still find the solution paths and remove those intersecting this polygon! 
+        #      beam search tree. But we could still find the solution paths and remove manually those intersecting this polygon! 
         
-        # Add listeners
+        # Load model for the agent
+        agentNode = self.scene.attachNewNode('agent-' + str(agent.instanceId))
+        if agent.modelFilename is not None:
+            model = self._loadModel(agent.modelFilename)
+            model.reparentTo(agentNode)
+            
+            if agent.transform is not None:
+                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
+                transformMat = Mat4(*agent.transform.ravel())
+                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
+                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
+            
+        agentNode.reparentTo(self.scene)
+        
+        # Load model for the left microphone
+        leftMicNode = agentNode.attachNewNode('microphone-left')
+        transform = np.array([[1.0, 0.0, 0.0, 0.0],
+                              [0.0, 1.0, 0.0, 0.0],
+                              [0.0, 0.0, 1.0, 0.0],
+                              [-interauralDistance/2, 0.0, 0.0, 1.0]])
+        transformMat = Mat4(*transform.ravel())
+        leftMicNode.setMat(transformMat)
+        #leftMicNode.setTransform(leftTrans)
+        model = self._loadSphereModel(refCenter=LVecBase3(0.0, 0.0, 0.0), radius=0.10, color=(1.0,0.0,0.0,1.0))
+        model.reparentTo(leftMicNode)
+        
+        # Load model for the right microphone
+        rightMicNode = agentNode.attachNewNode('microphone-right')
+        transform = np.array([[1.0, 0.0, 0.0, 0.0],
+                              [0.0, 1.0, 0.0, 0.0],
+                              [0.0, 0.0, 1.0, 0.0],
+                              [interauralDistance/2, 0.0, 0.0, 1.0]])
+        transformMat = Mat4(*transform.ravel())
+        rightMicNode.setMat(transformMat)
+        model = self._loadSphereModel(refCenter=LVecBase3(0.0, 0.0, 0.0), radius=0.10, color=(1.0,0.0,0.0,1.0))
+        model.reparentTo(rightMicNode)
+        
+        # Add listeners for EVERT
         lstLeft = Listener()
-        lstLeft.setPosition(Vector3(0, 0, 0))
-        lstLeft.setOrientation(Matrix3(0,0,-1,
-                                       -1,0,0,
-                                       0,1,0))
+        leftNetTans = leftMicNode.getNetTransform().getMat()
+        leftNetPos = leftNetTans.getRow3(3)
+        leftNetMat = leftNetTans.getUpper3()
+        lstLeft.setPosition(Vector3(leftNetPos.x * 1000.0, leftNetPos.y * 1000.0, leftNetPos.z * 1000.0)) # m to mm
+        lstLeft.setOrientation(Matrix3(leftNetMat.getCell(0,0), leftNetMat.getCell(0,1), leftNetMat.getCell(0,2),
+                                       leftNetMat.getCell(1,0), leftNetMat.getCell(1,1), leftNetMat.getCell(1,2),
+                                       leftNetMat.getCell(2,0), leftNetMat.getCell(2,1), leftNetMat.getCell(2,2)))
         lstLeft.setName(str(agent.instanceId) + '-lst-left')
         self.world.addListener(lstLeft)
-    
+     
         lstRight = Listener()
-        lstRight.setPosition(Vector3(0, 0, 0))
-        lstRight.setOrientation(Matrix3(0,0,-1,
-                                       -1,0,0,
-                                       0,1,0))
+        rightNetTans = rightMicNode.getNetTransform().getMat()
+        rightNetPos = rightNetTans.getRow3(3)
+        rightNetMat = rightNetTans.getUpper3()
+        lstLeft.setPosition(Vector3(rightNetPos.x * 1000.0, rightNetPos.y * 1000.0, rightNetPos.z * 1000.0)) # m to mm
+        lstLeft.setOrientation(Matrix3(rightNetMat.getCell(0,0), rightNetMat.getCell(0,1), rightNetMat.getCell(0,2),
+                                       rightNetMat.getCell(1,0), rightNetMat.getCell(1,1), rightNetMat.getCell(1,2),
+                                       rightNetMat.getCell(2,0), rightNetMat.getCell(2,1), rightNetMat.getCell(2,2)))
         lstRight.setName(str(agent.instanceId) + '-lst-right')
         self.world.addListener(lstRight)
-        
-        #nodePath = self.render.attachNewNode(node)
+                
+        self.agents.append(agent)
+        self.listenerNodesByInstanceId[agent.instanceId] = [leftMicNode, rightMicNode]
+                
+        return agentNode
                 
     def addObjectToScene(self, obj, mode='bbox'):
 
@@ -935,6 +1218,8 @@ class EvertAcousticWorld(AcousticWorld):
             model.setMaterial(material, 1)
     
             # Add polygons to EVERT engine
+            #TODO: for bounding box approximations, we could reduce the number of triangles by
+            #      half if each face of the box was modelled as a single rectangular polygon.
             polygons = getAcousticPolygonsFromModel(model)
             for polygon in polygons:
                 polygon.setMaterialId(materialId)
@@ -973,9 +1258,6 @@ class EvertAcousticWorld(AcousticWorld):
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
                 
         for obj in room.objects:
-            
-            # Ignore doors
-            
             objNode = self.addObjectToScene(obj)
             objNode.reparentTo(node)
             
@@ -1010,29 +1292,45 @@ class EvertAcousticWorld(AcousticWorld):
         #dt = self.globalClock.getDt()
         
         # Update positions of listeners
-        #for l in range(self.world.numListeners()):
-        #    lst = self.world.getListener(l)
-        #    lst.setPosition(Vector3( 0, 0, 1))
+        for agent in self.agents:
+            
+            lstLeft = None
+            lstRight = None
+            for i in range(self.world.numListeners()):
+                lst = self.world.getListener(i)
+                if lst.getName() == str(agent.instanceId) + '-lst-left':
+                    lstLeft = lst
+                elif lst.getName() == str(agent.instanceId) + '-lst-right':
+                    lstRight = lst
+            assert lstLeft is not None
+            assert lstRight is not None
+            
+            lstLeftNode, lstRightNode = self.listenerNodesByInstanceId[agent.instanceId]
+            
+            leftNetTans = lstLeftNode.getNetTransform().getMat()
+            leftNetPos = leftNetTans.getRow3(3)
+            leftNetMat = leftNetTans.getUpper3()
+            lstLeft.setPosition(Vector3(leftNetPos.x * 1000.0, leftNetPos.y * 1000.0, leftNetPos.z * 1000.0)) # m to mm
+            lstLeft.setOrientation(Matrix3(leftNetMat.getCell(0,0), leftNetMat.getCell(0,1), leftNetMat.getCell(0,2),
+                                           leftNetMat.getCell(1,0), leftNetMat.getCell(1,1), leftNetMat.getCell(1,2),
+                                           leftNetMat.getCell(2,0), leftNetMat.getCell(2,1), leftNetMat.getCell(2,2)))
+            
+            rightNetTans = lstRightNode.getNetTransform().getMat()
+            rightNetPos = rightNetTans.getRow3(3)
+            rightNetMat = rightNetTans.getUpper3()
+            lstRight.setPosition(Vector3(rightNetPos.x * 1000.0, rightNetPos.y * 1000.0, rightNetPos.z * 1000.0)) # m to mm
+            lstRight.setOrientation(Matrix3(rightNetMat.getCell(0,0), rightNetMat.getCell(0,1), rightNetMat.getCell(0,2),
+                                            rightNetMat.getCell(1,0), rightNetMat.getCell(1,1), rightNetMat.getCell(1,2),
+                                            rightNetMat.getCell(2,0), rightNetMat.getCell(2,1), rightNetMat.getCell(2,2)))
         
-        #TODO: implement function
-        
+            logger.debug('Agent %s: left microphone at position (x=%f, y=%f, z=%f)' % (agent.instanceId, leftNetPos.x, leftNetPos.y, leftNetPos.z))
+            logger.debug('Agent %s: right microphone at position (x=%f, y=%f, z=%f)' % (agent.instanceId, rightNetPos.x, rightNetPos.y, rightNetPos.z))
+            
         # Update solutions
         for solution in self.solutions:
             solution.update()
         
         #NOTE: we may need to call frame rendering twice because of double-buffering
+        self._renderAcousticSolutions()
         self.graphicsEngine.renderFrame()
-            
-    def resetScene(self):
-        # FIXME: find out why this function outputs a lot of logs to STDERR 
-        childNodes = self.scene.ls()
-        if childNodes is not None:
-            for node in childNodes:
-                node.detachNode()
-                node.removeNode()
-        self.scene.clearLight()
-        self.scene.clearShader()
-        self.scene.detachNode()
-        self.scene.removeNode()
-        self.scene = self.render.attachNewNode('scene')
         

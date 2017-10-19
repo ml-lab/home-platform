@@ -1,0 +1,172 @@
+<CoordinateSystem> { y-up-left }
+
+
+<Group> Cube {
+	<Transform> {
+		<Matrix4> { 
+			1.0 0.0 0.0 0.0 
+			0.0 1.0 0.0 0.0 
+			0.0 0.0 1.0 0.0 
+			0.0 0.0 0.0 1.0 
+		}
+	}
+	<VertexPool> Cube.verts {
+		<Vertex> 0 { 0.5 -0.5 0.5
+			<Normal> { 0.0 -1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 1 { -0.5 -0.5 -0.5
+			<Normal> { 0.0 -1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 2 { 0.5 -0.5 -0.5
+			<Normal> { 0.0 -1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 3 { -0.5 -0.5 0.5
+			<Normal> { 0.0 -1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 4 { 0.5 0.5 0.5
+			<Normal> { 0.0 1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 5 { -0.5 0.5 -0.5
+			<Normal> { 0.0 1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 6 { -0.5 0.5 0.5
+			<Normal> { 0.0 1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 7 { 0.5 0.5 -0.5
+			<Normal> { 0.0 1.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 8 { 0.5 -0.5 0.5
+			<Normal> { 0.0 0.0 1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 9 { -0.5 0.5 0.5
+			<Normal> { 0.0 0.0 1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 10 { -0.5 -0.5 0.5
+			<Normal> { 0.0 0.0 1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 11 { 0.5 0.5 0.5
+			<Normal> { 0.0 0.0 1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 12 { -0.5 -0.5 0.5
+			<Normal> { -1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 13 { -0.5 0.5 -0.5
+			<Normal> { -1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 14 { -0.5 -0.5 -0.5
+			<Normal> { -1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 15 { -0.5 0.5 0.5
+			<Normal> { -1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 16 { -0.5 -0.5 -0.5
+			<Normal> { 0.0 0.0 -1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 17 { 0.5 0.5 -0.5
+			<Normal> { 0.0 0.0 -1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 18 { 0.5 -0.5 -0.5
+			<Normal> { 0.0 0.0 -1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 19 { -0.5 0.5 -0.5
+			<Normal> { 0.0 0.0 -1.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 20 { 0.5 -0.5 -0.5
+			<Normal> { 1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 21 { 0.5 0.5 0.5
+			<Normal> { 1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 22 { 0.5 -0.5 0.5
+			<Normal> { 1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+		<Vertex> 23 { 0.5 0.5 -0.5
+			<Normal> { 1.0 0.0 0.0 }
+			<UV> { 0.0 0.0 }
+		}
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 2 1 0 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 3 0 1 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 6 5 4 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 7 4 5 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 10 9 8 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 11 8 9 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 14 13 12 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 15 12 13 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 18 17 16 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 19 16 17 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 22 21 20 <Ref> { Cube.verts } }
+	}
+	<Polygon>  {
+		<RGBA> { 1.0 1.0 1.0 1.0 }
+		<BFace> { 0 }
+		<VertexRef> { 23 20 21 <Ref> { Cube.verts } }
+	}
+}
+
