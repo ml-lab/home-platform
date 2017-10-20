@@ -31,6 +31,7 @@ import logging
 import numpy as np
 import unittest
 import matplotlib.pyplot as plt
+from panda3d.core import LVector3f, SceneGraphAnalyzer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
@@ -130,7 +131,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
         engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3)
         engine.destroy()
             
-    def testSimpleCubeRoom(self):
+    def testRenderSimpleCubeRoom(self):
         
         engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=4, materialAbsorption=False, frequencyDependent=False)
 
@@ -168,9 +169,9 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, 0.0, sourceSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
         source = Object(instanceId, modelId, modelFilename, transform=transform)
-        sourceNode = engine.addStaticSourceToScene(source, instanceId)
-        #sourceNode.setPos(0.25 * roomSize, -0.25 * roomSize, 0.4 * roomSize)
-
+        sourceNode = engine.addStaticSourceToScene(source)
+        sourceNode.setPos(0.0, 0.0, 0.0)
+        
         center = engine.world.getCenter()
         self.assertTrue(np.allclose(engine.world.getMaxLength(), roomSize * 1000.0))
         self.assertTrue(np.allclose([center.x, center.y, center.z],[0.0, 0.0, 0.0]))
@@ -179,6 +180,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
         
         engine.updateBSP()
         
+        # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
         mat = np.array([0.999992, 0.00394238, 0, 0,
                         -0.00295702, 0.750104, -0.661314, 0,
@@ -209,6 +211,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
         time.sleep(1.0)
         plt.close(fig)
         
+        # Calculate and show impulse responses
         impulseLeft = engine.calculateImpulseResponse(engine.solutions[0], maxImpulseLength=1.0, threshold=120.0)
         impulseRight = engine.calculateImpulseResponse(engine.solutions[1], maxImpulseLength=1.0, threshold=120.0)
         
@@ -222,9 +225,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
         
         engine.destroy()
             
-class TestHouse(unittest.TestCase):
-    
-    def testRender(self):
+    def testRenderHouse(self):
         
         engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=8, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
         
@@ -233,11 +234,134 @@ class TestHouse(unittest.TestCase):
 
         engine.addHouseToScene(house)
         
+        # Configure the camera
+        #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
         mat = np.array([0.999992, 0.00394238, 0, 0,
                         -0.00295702, 0.750104, -0.661314, 0,
                         -0.00260737, 0.661308, 0.75011, 0,
                         43.621, -55.7499, 12.9722, 1])
         engine.setCamera(mat)
+        engine.step()
+        image = engine.getRgbImage()
+        
+        fig = plt.figure()
+        plt.axis("off")
+        ax = plt.subplot(111)
+        ax.imshow(image)
+        plt.show(block=False)
+        time.sleep(1.0)
+        plt.close(fig)
+        
+        engine.destroy()
+
+    def testRenderRoom(self):
+
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        
+        # Define the scene geometry
+        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
+                                   TEST_SUNCG_DATA_DIR)
+        room = house.rooms[1]
+        self.assertTrue(room.instanceId == 'fr_0rm_1')
+        self.assertTrue(len(room.objects) == 18)
+        
+        roomNode = engine.addRoomToScene(room)
+        
+        minRefBounds, maxRefBounds = roomNode.getTightBounds()
+        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
+        
+        # Define a listening agent
+        agentSize = 0.1
+        instanceId = 'agent'
+        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
+        transform = np.array([[agentSize, 0.0, 0.0, 0.0],
+                              [0.0, agentSize, 0.0, 0.0],
+                              [0.0, 0.0, agentSize, 0.0],
+                              [0.0, 0.0, 0.0, 1.0]])
+        agent = Agent(instanceId, modelFilename, transform)
+        agentNode = engine.addAgentToScene(agent, interauralDistance=0.5)
+        agentNode.setHpr(90,0,0)
+        agentNode.setPos(LVector3f(-2.0, 1.0, -0.75) + refCenter)
+        
+        # Define a sound source
+        sourceSize = 0.25
+        instanceId = 'source'
+        modelId = '0'
+        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
+        transform = np.array([[sourceSize, 0.0, 0.0, 0.0],
+                              [0.0, sourceSize, 0.0, 0.0],
+                              [0.0, 0.0, sourceSize, 0.0],
+                              [0.0, 0.0, 0.0, 1.0]])
+        source = Object(instanceId, modelId, modelFilename, transform=transform)
+        sourceNode = engine.addStaticSourceToScene(source)
+        sourceNode.setPos(LVector3f(1.5, -1.0, -0.25) + refCenter)
+
+        engine.updateBSP()
+        
+        # Configure the camera
+        #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
+        mat = np.array([[1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, -1.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [refCenter.x-0.5, refCenter.y-0.5, 15, 1]])
+        engine.setCamera(mat)
+        
+        engine.step()
+        image = engine.getRgbImage()
+        
+        fig = plt.figure()
+        plt.axis("off")
+        ax = plt.subplot(111)
+        ax.imshow(image)
+        plt.show(block=False)
+        time.sleep(1.0)
+        plt.close(fig)
+        
+        # Calculate and show impulse responses
+        impulseLeft = engine.calculateImpulseResponse(engine.solutions[0], maxImpulseLength=1.0, threshold=120.0)
+        impulseRight = engine.calculateImpulseResponse(engine.solutions[1], maxImpulseLength=1.0, threshold=120.0)
+        
+        fig = plt.figure()
+        plt.plot(impulseLeft, color='b', label='Left channel')
+        plt.plot(impulseRight, color='g', label='Right channel')
+        plt.legend()
+        plt.show(block=False)
+        time.sleep(1.0)
+        plt.close(fig)
+        
+        engine.destroy()
+
+    def testRenderRoomPolygons(self):
+
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=1, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        
+        # Define the scene geometry
+        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
+                                   TEST_SUNCG_DATA_DIR)
+        room = house.rooms[1]
+        self.assertTrue(room.instanceId == 'fr_0rm_1')
+        self.assertTrue(len(room.objects) == 18)
+        
+        roomNode = engine.addRoomToScene(room)
+        
+        minRefBounds, maxRefBounds = roomNode.getTightBounds()
+        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
+        
+        engine.updateBSP()
+        
+        sga = SceneGraphAnalyzer()
+        sga.addNode(engine.render.node())
+        self.assertTrue(len(engine.acousticTriangles) == engine.world.numElements() == sga.get_num_triangles_in_strips())
+        self.assertTrue(len(engine.acousticTriangles) == engine.world.numConvexElements() == sga.get_num_triangles_in_strips())
+        
+        # Configure the camera
+        #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
+        mat = np.array([[1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, -1.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [refCenter.x-0.5, refCenter.y-0.5, 15, 1]])
+        engine.setCamera(mat)
+        
         engine.step()
         image = engine.getRgbImage()
         

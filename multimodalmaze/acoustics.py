@@ -32,7 +32,7 @@ import matplotlib.pyplot as plt
 
 from scipy import signal
 from string import digits
-from evert import Room, Source, Listener, Vector3, Matrix3, Polygon, PathSolution
+from evert import Room, Source, Listener, Vector3, Matrix3, Polygon, PathSolution, Viewer
 
 from multimodalmaze.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
 
@@ -541,6 +541,7 @@ def getIntersectionPointsFromPath(path):
                                 (epts[i-1].z - epts[i].z)**2)
         
             # Skip duplicated points
+            #TODO: we may not need to check for duplicates in geometry, as this was due to another bug
             if segLength == 0.0: 
                 continue
             
@@ -558,7 +559,9 @@ def getIntersectedMaterialIdsFromPath(path):
                             (lastPt.z - pt.z)**2)
         
         # Skip duplicated points
-        if segLength == 0.0: continue
+        #TODO: we may not need to check for duplicates in geometry, as this was due to another bug
+        if segLength == 0.0: 
+            continue
         
         if i >= 2:
             polygons.append(path.m_polygons[i-2])
@@ -569,6 +572,60 @@ def getIntersectedMaterialIdsFromPath(path):
         materialIds.append(polygon.getMaterialId())
     
     return materialIds
+
+
+# Moller-Trumbore ray-triangle intersection algorithm vectorized with Numpy
+# Adapted from: https://en.wikipedia.org/wiki/M%C3%B6ller%E2%80%93Trumbore_intersection_algorithm
+# See also: https://www.scratchapixel.com/lessons/3d-basic-rendering/ray-tracing-rendering-a-triangle/moller-trumbore-ray-triangle-intersection
+def rayIntersectsTriangles(startPt, endPt, triangles, eps=1e-3):
+    
+    mask = np.ones((triangles.shape[0],), dtype=np.bool)
+    
+    d = np.linalg.norm((endPt - startPt), 2)
+    vdir = (endPt - startPt) / d
+    
+    vertex0, vertex1, vertex2  = triangles[:,0,:], triangles[:,1,:], triangles[:,2,:]
+    edge1 = vertex1 - vertex0
+    edge2 = vertex2 - vertex0
+    
+    h = np.cross(vdir, edge2)
+    a = np.einsum('ij,ij->i', edge1, h)
+    mask &= np.logical_not((a > -eps) & (a < eps))
+    
+    f = 1/a
+    s = startPt - vertex0
+    u = f * np.einsum('ij,ij->i', s, h)
+    mask &= np.logical_not((u < 0.0) | (u > 1.0))
+    
+    q = np.cross(s, edge1)
+    v = f * np.einsum('ij,ij->i', vdir[np.newaxis,:], q)
+    mask &= np.logical_not((v < 0.0) | (u + v > 1.0))
+    
+    # NOTE: t is the distance from the start point to the intersection on the plane defined by the triangle
+    t = f * np.einsum('ij,ij->i', edge2, q)
+    mask &= (t > eps)
+    mask &= np.logical_not(np.isclose(t, d[np.newaxis], atol=eps))
+    mask &= (t < d[np.newaxis])
+        
+    return np.any(mask)
+
+def validatePath(path, triangles, eps):
+    
+    isValid = True
+    pts = getIntersectionPointsFromPath(path)
+    lastPt = pts[0]
+    for pt in pts[1:]:
+        
+        if rayIntersectsTriangles(np.array([lastPt.x, lastPt.y, lastPt.z]),
+                                  np.array([pt.x, pt.y, pt.z]),
+                                  triangles,
+                                  eps):
+            isValid = False
+            break
+         
+        lastPt = pt
+    
+    return isValid
 
 class EvertAcousticWorld(AcousticWorld):
 
@@ -596,6 +653,8 @@ class EvertAcousticWorld(AcousticWorld):
                  materialAbsorption=True, frequencyDependent=True,
                  size=(512,512), showCeiling=True):
 
+        self.acousticTriangles = []
+
         self.samplingRate = samplingRate
         self.maximumOrder = maximumOrder
         self.materialAbsorption = materialAbsorption
@@ -620,7 +679,7 @@ class EvertAcousticWorld(AcousticWorld):
         self.listenerNodesByInstanceId = dict()
     
         self.sources = []
-        self.evertSourcesByInstanceId = dict()
+        self.sourceNodesByInstanceId = dict()
     
     def _initRender(self, size, showCeiling):
         # Rendering attributes
@@ -712,7 +771,13 @@ class EvertAcousticWorld(AcousticWorld):
         image = np.flipud(image)
         return image
     
-    def _renderInfo(self):
+    def visualize(self):
+        self._updateSources()
+        self._updateListeners()
+        viewer = Viewer(self.world, self.maximumOrder)
+        viewer.show()
+    
+    def renderInfo(self):
         sga = SceneGraphAnalyzer()
         sga.addNode(self.render.node())
         
@@ -968,14 +1033,19 @@ class EvertAcousticWorld(AcousticWorld):
             
             # Sort by increasing path lengh
             paths = []
+            nbValidPaths = 0
             for i in range(solution.numPaths()):
                 path = solution.getPath(i)
-                pathLength = getPathLength(path)
-                paths.append((pathLength, path))
+                if validatePath(path, self.acousticTriangles, eps=1e-3):
+                    pathLength = getPathLength(path)
+                    paths.append((pathLength, path))
+                    nbValidPaths += 1
             paths.sort(key=lambda x: x[0])
             paths = [path for _, path in paths]
+            logger.debug('Number of valid paths found for solution %d: %d (out of %d)' % (i, nbValidPaths, solution.numPaths()))
             
             # Draw each solution path
+            nbValidPaths = 0
             for path in paths:
                 self._renderAcousticPath(path, color)
             
@@ -989,47 +1059,47 @@ class EvertAcousticWorld(AcousticWorld):
         realImpulseLength = 0.0
         for i in range(solution.numPaths()):
             path = solution.getPath(i)
-            delay, attenuationsDb, _ = self._calculateDelayAndAttenuation(path)
+            if validatePath(path, self.acousticTriangles, eps=1e-3):
             
-            # Add path impulse to global impulse
-            delaySamples = int(delay * self.samplingRate)
-            
-            # Skip paths that are below attenuation threshold (dB)
-            if np.any(abs(attenuationsDb) < threshold):
+                delay, attenuationsDb, _ = self._calculateDelayAndAttenuation(path)
                 
-                if self.frequencyDependent:
+                # Add path impulse to global impulse
+                delaySamples = int(delay * self.samplingRate)
                 
-                    # Skip paths that would have their impulse responses truncated at the end
-                    if delaySamples + self.filterbank.n < len(impulse):
+                # Skip paths that are below attenuation threshold (dB)
+                if np.any(abs(attenuationsDb) < threshold):
                     
-                        linearGains = 10.0 ** (attenuationsDb/20.0)
-                        pathImpulse = self.filterbank.getScaledImpulseResponse(linearGains)
-                            
-                        startIdx = delaySamples - self.filterbank.n/2
-                        endIdx = startIdx + self.filterbank.n - 1
-                        if startIdx < 0:
-                            trimStartIdx = -startIdx
-                            startIdx = 0
-                        else:
-                            trimStartIdx = 0
+                    if self.frequencyDependent:
+                    
+                        # Skip paths that would have their impulse responses truncated at the end
+                        if delaySamples + self.filterbank.n < len(impulse):
                         
-                        impulse[startIdx:endIdx+1] += pathImpulse[trimStartIdx:]
-                    
-                        if endIdx+1 > realImpulseLength:
-                            realImpulseLength = endIdx+1
-                else:
-                    # Use attenuation at 1000 Hz
-                    linearGain = 10.0 ** (attenuationsDb[3]/20.0)
-                    impulse[delaySamples] += linearGain
-                    if delaySamples+1 > realImpulseLength:
-                        realImpulseLength = delaySamples+1
+                            linearGains = 10.0 ** (attenuationsDb/20.0)
+                            pathImpulse = self.filterbank.getScaledImpulseResponse(linearGains)
+                                
+                            startIdx = delaySamples - self.filterbank.n/2
+                            endIdx = startIdx + self.filterbank.n - 1
+                            if startIdx < 0:
+                                trimStartIdx = -startIdx
+                                startIdx = 0
+                            else:
+                                trimStartIdx = 0
+                            
+                            impulse[startIdx:endIdx+1] += pathImpulse[trimStartIdx:]
+                        
+                            if endIdx+1 > realImpulseLength:
+                                realImpulseLength = endIdx+1
+                    else:
+                        # Use attenuation at 1000 Hz
+                        linearGain = 10.0 ** (attenuationsDb[3]/20.0)
+                        impulse[delaySamples] += linearGain
+                        if delaySamples+1 > realImpulseLength:
+                            realImpulseLength = delaySamples+1
                 
         return impulse[:realImpulseLength]
     
-    def addStaticSourceToScene(self, obj, instanceId, radius=0.5, color=(1.0,0.0,0.0,1.0)):
+    def addStaticSourceToScene(self, obj, radius=0.5, color=(1.0,0.0,0.0,1.0)):
 
-        node = self.scene.attachNewNode('object-' + str(obj.instanceId))
-        
         # Load model for the sound source
         sourceNode = self.scene.attachNewNode('acoustic-source-' + str(obj.instanceId))
         sourceNode.reparentTo(self.scene)
@@ -1055,20 +1125,13 @@ class EvertAcousticWorld(AcousticWorld):
         
         # Create source in EVERT
         src = Source()
-        srcNetTans = model.getNetTransform().getMat()
-        #srcNetPos = srcNetTans.getRow3(3)
-        srcNetMat = srcNetTans.getUpper3()
-        src.setPosition(Vector3(refCenter.x * 1000.0, refCenter.y * 1000.0, refCenter.z * 1000.0)) # m to mm
-        src.setOrientation(Matrix3(srcNetMat.getCell(0,0), srcNetMat.getCell(0,1), srcNetMat.getCell(0,2),
-                                   srcNetMat.getCell(1,0), srcNetMat.getCell(1,1), srcNetMat.getCell(1,2),
-                                   srcNetMat.getCell(2,0), srcNetMat.getCell(2,1), srcNetMat.getCell(2,2)))
-        src.setName(str(instanceId) + '-src')
+        src.setName(str(obj.instanceId) + '-src')
         self.world.addSource(src)
         
         self.sources.append(obj)
-        self.evertSourcesByInstanceId[obj.instanceId] = [src,]
+        self.sourceNodesByInstanceId[obj.instanceId] = sourceNode
         
-        return node
+        return sourceNode
     
     def addAgentToScene(self, agent, interauralDistance=0.25):
         
@@ -1116,24 +1179,10 @@ class EvertAcousticWorld(AcousticWorld):
         
         # Add listeners for EVERT
         lstLeft = Listener()
-        leftNetTans = leftMicNode.getNetTransform().getMat()
-        leftNetPos = leftNetTans.getRow3(3)
-        leftNetMat = leftNetTans.getUpper3()
-        lstLeft.setPosition(Vector3(leftNetPos.x * 1000.0, leftNetPos.y * 1000.0, leftNetPos.z * 1000.0)) # m to mm
-        lstLeft.setOrientation(Matrix3(leftNetMat.getCell(0,0), leftNetMat.getCell(0,1), leftNetMat.getCell(0,2),
-                                       leftNetMat.getCell(1,0), leftNetMat.getCell(1,1), leftNetMat.getCell(1,2),
-                                       leftNetMat.getCell(2,0), leftNetMat.getCell(2,1), leftNetMat.getCell(2,2)))
         lstLeft.setName(str(agent.instanceId) + '-lst-left')
         self.world.addListener(lstLeft)
      
         lstRight = Listener()
-        rightNetTans = rightMicNode.getNetTransform().getMat()
-        rightNetPos = rightNetTans.getRow3(3)
-        rightNetMat = rightNetTans.getUpper3()
-        lstLeft.setPosition(Vector3(rightNetPos.x * 1000.0, rightNetPos.y * 1000.0, rightNetPos.z * 1000.0)) # m to mm
-        lstLeft.setOrientation(Matrix3(rightNetMat.getCell(0,0), rightNetMat.getCell(0,1), rightNetMat.getCell(0,2),
-                                       rightNetMat.getCell(1,0), rightNetMat.getCell(1,1), rightNetMat.getCell(1,2),
-                                       rightNetMat.getCell(2,0), rightNetMat.getCell(2,1), rightNetMat.getCell(2,2)))
         lstRight.setName(str(agent.instanceId) + '-lst-right')
         self.world.addListener(lstRight)
                 
@@ -1224,6 +1273,10 @@ class EvertAcousticWorld(AcousticWorld):
             for polygon in polygons:
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
+            if len(self.acousticTriangles) == 0:
+                self.acousticTriangles = get3DTrianglesFromModel(model)
+            else:
+                self.acousticTriangles = np.concatenate((self.acousticTriangles, get3DTrianglesFromModel(model)))
     
         return node
     
@@ -1256,7 +1309,11 @@ class EvertAcousticWorld(AcousticWorld):
             for polygon in polygons:
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
-                
+            if len(self.acousticTriangles) == 0:
+                self.acousticTriangles = get3DTrianglesFromModel(model)
+            else:
+                self.acousticTriangles = np.concatenate((self.acousticTriangles, get3DTrianglesFromModel(model)))
+            
         for obj in room.objects:
             objNode = self.addObjectToScene(obj)
             objNode.reparentTo(node)
@@ -1277,7 +1334,36 @@ class EvertAcousticWorld(AcousticWorld):
         
         return node
     
+    def _updateSources(self):
+        
+        # Update positions of the static sources
+        for source in self.sources:
+            
+            src = None
+            for i in range(self.world.numSources()):
+                wsrc = self.world.getSource(i)
+                if wsrc.getName() == str(source.instanceId) + '-src':
+                    src = wsrc
+            assert src is not None
+            
+            sourceNode = self.sourceNodesByInstanceId[source.instanceId]
+            
+            sourceNetTans = sourceNode.getNetTransform().getMat()
+            sourceNetPos = sourceNetTans.getRow3(3)
+            sourceNetMat = sourceNetTans.getUpper3()
+            src.setPosition(Vector3(sourceNetPos.x * 1000.0, sourceNetPos.y * 1000.0, sourceNetPos.z * 1000.0)) # m to mm
+            #FIXME: EVERT seems to work in Y-up coordinate system, not Z-up like Panda3d
+            #yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+            #sourceNetMat = (sourceNetTans * yupTransformMat).getUpper3()
+            src.setOrientation(Matrix3(sourceNetMat.getCell(0,0), sourceNetMat.getCell(0,1), sourceNetMat.getCell(0,2),
+                                       sourceNetMat.getCell(1,0), sourceNetMat.getCell(1,1), sourceNetMat.getCell(1,2),
+                                       sourceNetMat.getCell(2,0), sourceNetMat.getCell(2,1), sourceNetMat.getCell(2,2)))
+            logger.debug('Static source %s: at position (x=%f, y=%f, z=%f)' % (source.instanceId, sourceNetPos.x, sourceNetPos.y, sourceNetPos.z))
+    
     def updateBSP(self):
+        
+        self._updateSources()
+        
         self.world.constructBSP()
         
         del self.solutions[:]
@@ -1288,9 +1374,8 @@ class EvertAcousticWorld(AcousticWorld):
                 solution = PathSolution(self.world, src, lst, self.maximumOrder)
                 self.solutions.append(solution)
     
-    def step(self):
-        #dt = self.globalClock.getDt()
-        
+    def _updateListeners(self):
+    
         # Update positions of listeners
         for agent in self.agents:
             
@@ -1311,6 +1396,9 @@ class EvertAcousticWorld(AcousticWorld):
             leftNetPos = leftNetTans.getRow3(3)
             leftNetMat = leftNetTans.getUpper3()
             lstLeft.setPosition(Vector3(leftNetPos.x * 1000.0, leftNetPos.y * 1000.0, leftNetPos.z * 1000.0)) # m to mm
+            #FIXME: EVERT seems to work in Y-up coordinate system, not Z-up like Panda3d
+            #yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+            #leftNetMat = (leftNetTans * yupTransformMat).getUpper3()
             lstLeft.setOrientation(Matrix3(leftNetMat.getCell(0,0), leftNetMat.getCell(0,1), leftNetMat.getCell(0,2),
                                            leftNetMat.getCell(1,0), leftNetMat.getCell(1,1), leftNetMat.getCell(1,2),
                                            leftNetMat.getCell(2,0), leftNetMat.getCell(2,1), leftNetMat.getCell(2,2)))
@@ -1319,12 +1407,20 @@ class EvertAcousticWorld(AcousticWorld):
             rightNetPos = rightNetTans.getRow3(3)
             rightNetMat = rightNetTans.getUpper3()
             lstRight.setPosition(Vector3(rightNetPos.x * 1000.0, rightNetPos.y * 1000.0, rightNetPos.z * 1000.0)) # m to mm
+            #FIXME: EVERT seems to work in Y-up coordinate system, not Z-up like Panda3d
+            #yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
+            #rightNetMat = (leftNetTans * yupTransformMat).getUpper3()
             lstRight.setOrientation(Matrix3(rightNetMat.getCell(0,0), rightNetMat.getCell(0,1), rightNetMat.getCell(0,2),
                                             rightNetMat.getCell(1,0), rightNetMat.getCell(1,1), rightNetMat.getCell(1,2),
                                             rightNetMat.getCell(2,0), rightNetMat.getCell(2,1), rightNetMat.getCell(2,2)))
         
             logger.debug('Agent %s: left microphone at position (x=%f, y=%f, z=%f)' % (agent.instanceId, leftNetPos.x, leftNetPos.y, leftNetPos.z))
             logger.debug('Agent %s: right microphone at position (x=%f, y=%f, z=%f)' % (agent.instanceId, rightNetPos.x, rightNetPos.y, rightNetPos.z))
+    
+    def step(self):
+        #dt = self.globalClock.getDt()
+        
+        self._updateListeners()
             
         # Update solutions
         for solution in self.solutions:

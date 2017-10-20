@@ -355,16 +355,12 @@ def get3DTrianglesFromModel(model):
     for nodePath in geomNodes:
         geomNode = nodePath.node()
         
-        #if 'WallInside' not in geomNode.name: continue
-        #print geomNode
-        
         for n in range(geomNode.getNumGeoms()):
             geom = geomNode.getGeom(n)
-    
+            vdata = geom.getVertexData()
+            
             for k in range(geom.getNumPrimitives()):
-                geom = geomNode.getGeom(k)
                 prim = geom.getPrimitive(k)
-                vdata = geom.getVertexData()
                 vertex = GeomVertexReader(vdata, 'vertex')
                 assert isinstance(prim, (GeomTristrips, GeomTriangles))
                 
@@ -384,7 +380,7 @@ def get3DTrianglesFromModel(model):
                         v = transformMat.xformPoint(v)
                         
                         triPts.append([v.x, v.y, v.z])
-                        #print "prim %s has vertex %s: %s" % (p, vi, repr(v))
+
                     triangles.append(triPts)
             
     triangles = np.array(triangles)
@@ -496,9 +492,4 @@ def getColorAttributesFromModel(model):
     areas /= np.sum(areas)
             
     return areas, rgbColors, transparencies, textures
-
-# From: https://stackoverflow.com/questions/2827393/angles-between-two-n-dimensional-vectors-in-python
-def angle_between(v1, v2):
-    return np.arccos(np.clip(np.dot(v1/np.linalg.norm(v1), 
-                                    v2/np.linalg.norm(v2)), -1.0, 1.0))
     
