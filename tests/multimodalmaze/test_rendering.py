@@ -43,7 +43,7 @@ class TestHouse(unittest.TestCase):
     
     #FIXME: find out why not working correctly with shadowing (shaders)
     def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False)
+        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
     
     def tearDown(self):
         self.render.destroy()
@@ -65,7 +65,7 @@ class TestHouse(unittest.TestCase):
         image = self.render.getRgbImage()
         depth = self.render.getDepthImage()
         
-        fig = plt.figure()
+        fig = plt.figure(figsize=(16,8))
         plt.axis("off")
         ax = plt.subplot(121)
         ax.imshow(image)
@@ -78,7 +78,7 @@ class TestHouse(unittest.TestCase):
 class TestRoom(unittest.TestCase):
     
     def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False)
+        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
     
     def tearDown(self):
         self.render.destroy()
@@ -116,7 +116,7 @@ class TestRoom(unittest.TestCase):
 class TestObject(unittest.TestCase):
     
     def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False)
+        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
     
     def tearDown(self):
         self.render.destroy()
@@ -156,7 +156,7 @@ class TestObject(unittest.TestCase):
 class TestAgent(unittest.TestCase):
     
     def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False)
+        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
         
     def tearDown(self):
         self.render.destroy()

@@ -71,13 +71,14 @@ class AcousticWorld(object):
 
 def getAcousticPolygonsFromModel(model):
     polygons = []
-    for triangle in get3DTrianglesFromModel(model):
+    triangles = get3DTrianglesFromModel(model)
+    for triangle in triangles:
         pts = []
         for pt in triangle:
             #NOTE: EVERT works in milimeter units
             pts.append(Vector3(pt[0]*1000.0,pt[1]*1000.0,pt[2]*1000.0))
         polygons.append(Polygon(pts))
-    return polygons
+    return polygons, triangles
     
 class HRTF(object):
     
@@ -646,13 +647,16 @@ class EvertAcousticWorld(AcousticWorld):
                     (1.0, 0.0, 0.0, 0.2), # red
                 ]
 
-    minRayRadius = 0.01
-    maxRayRadius = 0.1
+    minRayRadius = 0.01 # m
+    maxRayRadius = 0.1 # m
+    
+    minWidthThresholdPolygons = 0.1 # m
 
     def __init__(self, samplingRate=16000, maximumOrder=3, 
                  materialAbsorption=True, frequencyDependent=True,
                  size=(512,512), showCeiling=True):
 
+        #FIXME: no need to store those, since EVERT is correctly performing the validation after bug fixed.
         self.acousticTriangles = []
 
         self.samplingRate = samplingRate
@@ -961,24 +965,16 @@ class EvertAcousticWorld(AcousticWorld):
                                 (lastPt.y - pt.y)**2 + 
                                 (lastPt.z - pt.z)**2)
             assert segLength > 0.0
-        
+            cumLength += segLength
+            
             # Calculate air attenuation coefficient (dB)
-            airAttenuations, _ = AirAttenuationTable.getAttenuations(segLength, self.temperature, self.relativeHumidity, units='dB')
+            airAttenuations, _ = AirAttenuationTable.getAttenuations(cumLength, self.temperature, self.relativeHumidity, units='dB')
     
             # Calculate spherical geometric spreading attenuation (dB)
-            if i > 0:
-                distanceAttenuationsRef = 20.0 * np.log10(1.0/cumLength)
-                distanceAttenuations = 20.0 * np.log10(1.0/(cumLength+segLength))
-                distanceAttenuations = distanceAttenuations - distanceAttenuationsRef
-            else:
-                distanceAttenuations = 20.0 * np.log10(1.0/segLength)
+            distanceAttenuations = 20.0 * np.log10(1.0/cumLength)
             
-            if i == 0:
-                totalSegAttenuations[i] = np.mean(airAttenuations) + distanceAttenuations
-            else:
-                totalSegAttenuations[i] = totalSegAttenuations[i-1] + np.mean(airAttenuations) + distanceAttenuations
-                
-            cumLength += segLength
+            totalSegAttenuations[i] = np.mean(airAttenuations) + distanceAttenuations
+            
             lastPt = pt
         
         # Calculate material attenuation (dB)
@@ -996,9 +992,6 @@ class EvertAcousticWorld(AcousticWorld):
     def _renderAcousticPath(self, path, color):
         
         totalSegAttenuationsDb = self._calculateAttenuationPerSegment(path)
-        
-        # Make all attenuations relative to the shortest path
-        totalSegAttenuationsDb -= totalSegAttenuationsDb[0]
         
         pts = getIntersectionPointsFromPath(path)
         startPt = pts[0]
@@ -1033,19 +1026,15 @@ class EvertAcousticWorld(AcousticWorld):
             
             # Sort by increasing path lengh
             paths = []
-            nbValidPaths = 0
-            for i in range(solution.numPaths()):
-                path = solution.getPath(i)
-                if validatePath(path, self.acousticTriangles, eps=1e-3):
-                    pathLength = getPathLength(path)
-                    paths.append((pathLength, path))
-                    nbValidPaths += 1
+            for n in range(solution.numPaths()):
+                path = solution.getPath(n)
+                pathLength = getPathLength(path)
+                paths.append((pathLength, path))
             paths.sort(key=lambda x: x[0])
             paths = [path for _, path in paths]
-            logger.debug('Number of valid paths found for solution %d: %d (out of %d)' % (i, nbValidPaths, solution.numPaths()))
+            logger.debug('Number of paths found for solution %d: %d' % (i, solution.numPaths()))
             
             # Draw each solution path
-            nbValidPaths = 0
             for path in paths:
                 self._renderAcousticPath(path, color)
             
@@ -1059,42 +1048,46 @@ class EvertAcousticWorld(AcousticWorld):
         realImpulseLength = 0.0
         for i in range(solution.numPaths()):
             path = solution.getPath(i)
-            if validatePath(path, self.acousticTriangles, eps=1e-3):
+        
+            delay, attenuationsDb, _ = self._calculateDelayAndAttenuation(path)
             
-                delay, attenuationsDb, _ = self._calculateDelayAndAttenuation(path)
+            # Random phase inversion
+            phase = 1.0
+            if np.random.random() > 0.5:
+                phase *= -1
+            
+            # Add path impulse to global impulse
+            delaySamples = int(delay * self.samplingRate)
+            
+            # Skip paths that are below attenuation threshold (dB)
+            if np.any(abs(attenuationsDb) < threshold):
                 
-                # Add path impulse to global impulse
-                delaySamples = int(delay * self.samplingRate)
+                if self.frequencyDependent:
                 
-                # Skip paths that are below attenuation threshold (dB)
-                if np.any(abs(attenuationsDb) < threshold):
+                    # Skip paths that would have their impulse responses truncated at the end
+                    if delaySamples + self.filterbank.n < len(impulse):
                     
-                    if self.frequencyDependent:
-                    
-                        # Skip paths that would have their impulse responses truncated at the end
-                        if delaySamples + self.filterbank.n < len(impulse):
-                        
-                            linearGains = 10.0 ** (attenuationsDb/20.0)
-                            pathImpulse = self.filterbank.getScaledImpulseResponse(linearGains)
-                                
-                            startIdx = delaySamples - self.filterbank.n/2
-                            endIdx = startIdx + self.filterbank.n - 1
-                            if startIdx < 0:
-                                trimStartIdx = -startIdx
-                                startIdx = 0
-                            else:
-                                trimStartIdx = 0
+                        linearGains = 10.0 ** (attenuationsDb/20.0)
+                        pathImpulse = self.filterbank.getScaledImpulseResponse(linearGains)
                             
-                            impulse[startIdx:endIdx+1] += pathImpulse[trimStartIdx:]
+                        startIdx = delaySamples - self.filterbank.n/2
+                        endIdx = startIdx + self.filterbank.n - 1
+                        if startIdx < 0:
+                            trimStartIdx = -startIdx
+                            startIdx = 0
+                        else:
+                            trimStartIdx = 0
                         
-                            if endIdx+1 > realImpulseLength:
-                                realImpulseLength = endIdx+1
-                    else:
-                        # Use attenuation at 1000 Hz
-                        linearGain = 10.0 ** (attenuationsDb[3]/20.0)
-                        impulse[delaySamples] += linearGain
-                        if delaySamples+1 > realImpulseLength:
-                            realImpulseLength = delaySamples+1
+                        impulse[startIdx:endIdx+1] += phase * pathImpulse[trimStartIdx:]
+                    
+                        if endIdx+1 > realImpulseLength:
+                            realImpulseLength = endIdx+1
+                else:
+                    # Use attenuation at 1000 Hz
+                    linearGain = 10.0 ** (attenuationsDb[3]/20.0)
+                    impulse[delaySamples] += phase * linearGain
+                    if delaySamples+1 > realImpulseLength:
+                        realImpulseLength = delaySamples+1
                 
         return impulse[:realImpulseLength]
     
@@ -1269,7 +1262,7 @@ class EvertAcousticWorld(AcousticWorld):
             # Add polygons to EVERT engine
             #TODO: for bounding box approximations, we could reduce the number of triangles by
             #      half if each face of the box was modelled as a single rectangular polygon.
-            polygons = getAcousticPolygonsFromModel(model)
+            polygons, triangles = getAcousticPolygonsFromModel(model)
             for polygon in polygons:
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
@@ -1280,9 +1273,10 @@ class EvertAcousticWorld(AcousticWorld):
     
         return node
     
-    def addRoomToScene(self, room):
+    def addRoomToScene(self, room, ignoreObjects=False):
 
         node = self.scene.attachNewNode('room-' + str(room.instanceId))
+        nbRejectedPolygons = 0
         for modelFilename in room.modelFilenames:
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
@@ -1305,8 +1299,16 @@ class EvertAcousticWorld(AcousticWorld):
             model.setMaterial(material, 1)
             
             # Add polygons to EVERT engine
-            polygons = getAcousticPolygonsFromModel(model)
-            for polygon in polygons:
+            polygons, triangles = getAcousticPolygonsFromModel(model)
+            for polygon, triangle in zip(polygons,triangles):
+                
+                # Validate triangle
+                dims = np.max(triangle, axis=0) - np.min(triangle, axis=0)
+                s = np.sum(np.array(dims > self.minWidthThresholdPolygons, dtype=np.int))
+                if s < 2:
+                    nbRejectedPolygons += 1
+                    continue
+                
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
             if len(self.acousticTriangles) == 0:
@@ -1314,23 +1316,27 @@ class EvertAcousticWorld(AcousticWorld):
             else:
                 self.acousticTriangles = np.concatenate((self.acousticTriangles, get3DTrianglesFromModel(model)))
             
-        for obj in room.objects:
-            objNode = self.addObjectToScene(obj)
-            objNode.reparentTo(node)
+        if not ignoreObjects:
+            for obj in room.objects:
+                objNode = self.addObjectToScene(obj)
+                objNode.reparentTo(node)
+            
+        logger.debug('Number of rejected polygons: %d' % (nbRejectedPolygons))
             
         return node
 
-    def addHouseToScene(self, house):
+    def addHouseToScene(self, house, ignoreObjects=False):
 
         node = self.scene.attachNewNode('house-' + str(house.instanceId))
     
         for room in house.rooms:
-            roomNode = self.addRoomToScene(room)
+            roomNode = self.addRoomToScene(room, ignoreObjects)
             roomNode.reparentTo(node)
         
-        for obj in house.objects:
-            objNode = self.addObjectToScene(obj)
-            objNode.reparentTo(node)
+        if not ignoreObjects:
+            for obj in house.objects:
+                objNode = self.addObjectToScene(obj)
+                objNode.reparentTo(node)
         
         return node
     

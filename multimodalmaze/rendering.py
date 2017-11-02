@@ -74,9 +74,10 @@ class Panda3dRenderWorld(RenderWorld):
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=True, showCeiling=True):
+    def __init__(self, size=(512,512), shadowing=True, showCeiling=True, mode='offscreen'):
         
         self.size = size
+        self.mode = mode
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
         self.graphicsEngine.setDefaultLoader(self.loader)
@@ -97,6 +98,8 @@ class Panda3dRenderWorld(RenderWorld):
         self._initRgbCapture()
         self._initDepthCapture()
         
+        self.graphicsEngine.openWindows()
+        
         self.__dict__.update(shadowing=shadowing, showCeiling=showCeiling)
 
     def _initRgbCapture(self):
@@ -110,18 +113,26 @@ class Panda3dRenderWorld(RenderWorld):
         camNode.setScene(self.render)
         cam = self.camera.attachNewNode(camNode)
         
-        winprops = WindowProperties.getDefault()
-        winprops = WindowProperties(winprops)
-        winprops.setSize(self.size[0], self.size[1])
+        winprops = WindowProperties.size(self.size[0], self.size[1])
         fbprops = FrameBufferProperties.getDefault()
         fbprops = FrameBufferProperties(fbprops)
-        fbprops.setRgbColor(1)
-        fbprops.setColorBits(24)
-        fbprops.setAlphaBits(8)
-        fbprops.setDepthBits(1) 
-        flags = GraphicsPipe.BFFbPropsOptional | GraphicsPipe.BFRefuseWindow
+        fbprops.setRgbaBits(8, 8, 8, 0)
+        
+        flags = GraphicsPipe.BFFbPropsOptional
+        if self.mode == 'onscreen':
+            flags = flags | GraphicsPipe.BFRequireWindow
+        elif self.mode == 'offscreen':
+            flags = flags | GraphicsPipe.BFRefuseWindow
+        else:
+            raise Exception('Unsupported rendering mode: %s' % (self.mode))
+        
         buf = self.graphicsEngine.makeOutput(self.pipe, 'RGB buffer', 0, fbprops,
                                              winprops, flags)
+        if buf is None:
+            raise Exception('Unable to create RGB buffer')
+        
+        # Set to render at the end
+        buf.setSort(10000)
         
         dr = buf.makeDisplayRegion()
         dr.setSort(0)
@@ -129,7 +140,8 @@ class Panda3dRenderWorld(RenderWorld):
         dr = camNode.getDisplayRegion(0)
         
         tex = Texture()
-        tex.setFormat(Texture.FRgb)
+        tex.setFormat(Texture.FRgb8)
+        tex.setComponentType(Texture.TUnsignedByte)
         buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
         
         self.rgbBuffer = buf
@@ -146,18 +158,31 @@ class Panda3dRenderWorld(RenderWorld):
         camNode.setScene(self.render)
         cam = self.camera.attachNewNode(camNode)
         
-        winprops = WindowProperties.getDefault()
-        winprops = WindowProperties(winprops)
-        winprops.setSize(self.size[0], self.size[1])
-        fbprops = FrameBufferProperties()
-        fbprops.setColorBits(0)
-        fbprops.setAlphaBits(0)
+        winprops = WindowProperties.size(self.size[0], self.size[1])
+        fbprops = FrameBufferProperties.getDefault()
+        fbprops = FrameBufferProperties(fbprops)
+        fbprops.setRgbColor(False)
+        fbprops.setRgbaBits(0, 0, 0, 0)
         fbprops.setStencilBits(0)
         fbprops.setMultisamples(0)
-        fbprops.setDepthBits(1)
-        flags = GraphicsPipe.BFFbPropsOptional | GraphicsPipe.BFRefuseWindow
+        fbprops.setBackBuffers(0)
+        fbprops.setDepthBits(16)
+        
+        flags = GraphicsPipe.BFFbPropsOptional
+        if self.mode == 'onscreen':
+            flags = flags | GraphicsPipe.BFRequireWindow
+        elif self.mode == 'offscreen':
+            flags = flags | GraphicsPipe.BFRefuseWindow
+        else:
+            raise Exception('Unsupported rendering mode: %s' % (self.mode))
+        
         buf = self.graphicsEngine.makeOutput(self.pipe, 'Depth buffer', 0, fbprops,
                                              winprops, flags)
+        if buf is None:
+            raise Exception('Unable to create depth buffer')
+        
+        # Set to render at the end
+        buf.setSort(10000)
         
         dr = buf.makeDisplayRegion()
         dr.setSort(0)
@@ -166,6 +191,7 @@ class Panda3dRenderWorld(RenderWorld):
         
         tex = Texture()
         tex.setFormat(Texture.FDepthComponent)
+        tex.setComponentType(Texture.TFloat)
         buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPDepth)
     
         self.depthBuffer = buf
@@ -175,23 +201,26 @@ class Panda3dRenderWorld(RenderWorld):
         self.graphicsEngine.removeAllWindows()
         del self.pipe
 
-    def getRgbImage(self, channelOrder="RGBA"):
+    def getRgbImage(self, channelOrder="RGB"):
         data = self.rgbTex.getRamImageAs(channelOrder)
-        image = np.frombuffer(data.get_data(), np.uint8)
+        image = np.frombuffer(data.get_data(), np.uint8) # Must match Texture.TUnsignedByte
         image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
         image = np.flipud(image)
         return image
     
     def getDepthImage(self):
         data = self.depthTex.getRamImage()
-        depthImage = np.frombuffer(data.get_data(), np.float32)
+        depthImage = np.frombuffer(data.get_data(), np.float32) # Must match Texture.TFloat
         depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize(), self.depthTex.getNumComponents())
         depthImage = np.flipud(depthImage)
         return depthImage
 
     def step(self):
-        #NOTE: we may need to call frame rendering twice because of double-buffering
         self.graphicsEngine.renderFrame()
+        
+        #NOTE: we need to call frame rendering twice in onscreen mode because of double-buffering
+        if self.mode == 'onscreen':
+            self.graphicsEngine.renderFrame()
         
     def _renderInfo(self):
         sga = SceneGraphAnalyzer()
@@ -462,7 +491,7 @@ def getColorAttributesFromModel(model):
 
             elif state.hasAttrib(ColorAttrib.getClassType()):
                 colorAttr = state.getAttrib(ColorAttrib.getClassType())
-                color = colorAttr.color
+                color = colorAttr.getColor()
                 
                 if isinstance(color, LVecBase4f):
                     rgbColor= [color[0], color[1], color[2]]
