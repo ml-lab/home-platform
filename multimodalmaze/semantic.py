@@ -104,7 +104,7 @@ def getColorAttributesFromModel(model):
 
             elif state.hasAttrib(ColorAttrib.getClassType()):
                 colorAttr = state.getAttrib(ColorAttrib.getClassType())
-                color = colorAttr.color
+                color = colorAttr.getColor()
                 
                 if isinstance(color, LVecBase4f):
                     rgbColor= [color[0], color[1], color[2]]
