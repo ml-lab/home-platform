@@ -14,9 +14,14 @@ Main requirements:
 To install dependencies on Ubuntu operating systems:
 ```
 sudo apt-get install python-pip python-dev build-essential libsndfile1
-sudo pip install --upgrade pip
-sudo pip install --upgrade numpy scipy matplotlib panda3d pysoundfile
+sudo pip2 install --upgrade pip numpy scipy matplotlib panda3d pysoundfile nose coverage
 ```
+(Packages `nose` and `coverage` are for tests only and can be omitted)
+
+Finally you have to install EVERT. In order to do so, please follow the instructions over at 
+https://github.com/sbrodeur/evert
+
+
 ## Installing the library
 
 Download the source code from the git repository:
