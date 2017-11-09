@@ -107,3 +107,7 @@ ENV/
 # Other files
 *~
 .DS_STORE
+
+# PyCharm stuff
+.idea
+.idea/
