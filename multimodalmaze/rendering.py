@@ -69,6 +69,7 @@ class RenderWorld(object):
 #TODO: add support for multithreading?
 #      see: https://www.panda3d.org/manual/index.php/Multithreaded_Render_Pipeline
 
+
 class Panda3dRenderWorld(RenderWorld):
 
     #TODO: add a debug mode showing wireframe only?
@@ -321,8 +322,10 @@ class Panda3dRenderWorld(RenderWorld):
             if not self.showCeiling and 'c' in os.path.basename(modelFilename):
                 objNode.hide()
                 
-        for obj in room.objects:
+        for idx, obj in enumerate(room.objects):
             objNode = self.addObjectToScene(obj)
+            obj.location = objNode.getPos()
+            room.objects[idx] = obj
             objNode.reparentTo(node)
             
         return node
@@ -335,10 +338,11 @@ class Panda3dRenderWorld(RenderWorld):
             roomNode = self.addRoomToScene(room)
             roomNode.reparentTo(node)
         
-        for obj in house.objects:
+        for idx, obj in enumerate(house.objects):
             objNode = self.addObjectToScene(obj)
+            obj.location = objNode.getPos()
+            house.objects[idx] = obj
             objNode.reparentTo(node)
-        
         return node
 
     def resetScene(self):
@@ -521,4 +525,3 @@ def getColorAttributesFromModel(model):
     areas /= np.sum(areas)
             
     return areas, rgbColors, transparencies, textures
-    

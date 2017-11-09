@@ -166,4 +166,3 @@ class House(object):
                     raise Exception('Unsupported node type: %s' % (node['type']))
                 
         return House(sceneId, rooms, objects)
-    
