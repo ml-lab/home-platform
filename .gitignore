@@ -107,3 +107,5 @@ ENV/
 # Other files
 *~
 .DS_STORE
+
+.idea/
