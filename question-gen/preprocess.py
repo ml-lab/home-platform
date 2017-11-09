@@ -23,7 +23,6 @@ def compute_all_relationships(house):
 
     directions = ['east', 'west', 'north', 'south']
     all_objects = house_objects + room_objects
-    print all_objects
     all_relationships = {x: {} for x in directions}
 
     for obj1 in all_objects:
