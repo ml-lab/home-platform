@@ -23,26 +23,27 @@ def compute_all_relationships(house):
 
     directions = ['east', 'west', 'north', 'south']
     all_objects = house_objects + room_objects
-    all_relationships = {x: {} for x in directions}
+    all_relationships = {x: [] for x in directions}
 
-    for obj1 in all_objects:
+    for i, obj1 in enumerate(all_objects):
         related_objects = {x: [] for x in directions}
-        for obj2 in all_objects:
-            if obj1 == obj2: continue
+        for j, obj2 in enumerate(all_objects):
+            if obj1 == obj2:
+                continue
             diff = [obj1.location[k] - obj2.location[k] for k in [0, 1]]
 
             if diff[0] > 0:
-                related_objects['east'].append(obj2.instanceId)
+                related_objects['east'].append(j)
             else:
-                related_objects['west'].append(obj2.instanceId)
+                related_objects['west'].append(j)
 
             if diff[1] > 0:
-                related_objects['north'].append(obj2.instanceId)
+                related_objects['north'].append(j)
             else:
-                related_objects['south'].append(obj2.instanceId)
+                related_objects['south'].append(j)
 
         for d in directions:
-            all_relationships[d][obj1.instanceId] = related_objects[d]
+            all_relationships[d].append(related_objects[d])
 
     return all_relationships
 
@@ -53,8 +54,9 @@ def set_object_properties(obj):
     """
     semantic_world = SuncgSemanticWorld(TEST_SUNCG_DATA_DIR)
 
-    obj.category = semantic_world.categoryMapping.getCoarseGrainedCategoryForModelId(obj.modelId)
-    obj.color = ' '.join(MaterialColorTable.getBasicColorsFromObject(obj, mode='basic'))
+    obj.shape = semantic_world.categoryMapping.getCoarseGrainedCategoryForModelId(obj.modelId)
+    obj.size = "normal"
+    obj.color = MaterialColorTable.getBasicColorsFromObject(obj, mode='basic')[0]
     obj.material = ' '.join(MaterialTable.getMaterialNameFromObject(obj))
 
     return obj
@@ -62,7 +64,7 @@ def set_object_properties(obj):
 
 def generate_scene_metadata(house_id):
     """
-    Generates a JSON file that contains
+    Generates a JSON file that contains a list of objects, and directional relationships b/w each pair of objects
     :param house_id:
     :return:
     """
@@ -72,21 +74,33 @@ def generate_scene_metadata(house_id):
         TEST_SUNCG_DATA_DIR)
     renderer.addHouseToScene(house)
 
-    keys = ['category', 'color', 'material']
-    metadata = {'objects': [], 'relationships': {}}
+    keys = ['shape', 'size', 'color', 'material']
+
+    metadata = {
+        'info': {'split': 'train'},
+        'scenes': [
+            {
+                "split": "train",
+                "image_index": 0,
+                "image_filename": "SUNCG_env_000000.png",
+                "objects": [],
+                "realationships": {}
+            }
+        ]
+    }
 
     for idx, obj in enumerate(house.objects):
         obj = set_object_properties(obj)
         house.objects[idx] = obj
-        metadata['objects'].append({k: v for k, v in vars(obj).iteritems() if k in keys})
+        metadata['scenes'][0]['objects'].append({k: v for k, v in vars(obj).iteritems() if k in keys})
 
     for room in house.rooms:
         for idx, obj in enumerate(room.objects):
             obj = set_object_properties(obj)
             room.objects[idx] = obj
-            metadata['objects'].append({k: v for k, v in vars(obj).iteritems() if k in keys})
+            metadata['scenes'][0]['objects'].append({k: v for k, v in vars(obj).iteritems() if k in keys})
 
-    metadata['relationships'] = compute_all_relationships(house)
+    metadata['scenes'][0]['relationships'] = compute_all_relationships(house)
     renderer.destroy()
 
     return metadata
