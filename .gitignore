@@ -108,4 +108,6 @@ ENV/
 *~
 .DS_STORE
 
+# PyCharm stuff
+.idea
 .idea/
