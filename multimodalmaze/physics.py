@@ -231,7 +231,10 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         pass
 
 def calculate2dMapFromScene(house, actor):
-
+  
+    #TODO: we might also wanna look into this: 
+    # https://www.panda3d.org/manual/index.php/Collision_Traversers for a navigating agent
+  
     #TODO: sweep map with agent to find navigable 2D map
     #    see: https://www.panda3d.org/manual/index.php/Bullet_Queries
     
