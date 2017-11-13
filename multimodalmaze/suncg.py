@@ -31,52 +31,54 @@ import numpy as np
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
 
 logger = logging.getLogger(__name__)
-      
+
+
 def ignoreVariant(modelId):
     suffix = "_0"
     if modelId.endswith(suffix):
-        modelId =  modelId[:len(modelId) - len(suffix)]
+        modelId = modelId[:len(modelId) - len(suffix)]
     return modelId
-      
-class ModelInformation(object):
 
+
+class ModelInformation(object):
     header = 'id,front,nmaterials,minPoint,maxPoint,aligned.dims,index,variantIds'
 
     def __init__(self, filename):
         self.model_info = {}
-        
+
         self._parseFromCSV(filename)
-        
+
     def _parseFromCSV(self, filename):
         with open(filename, 'rb') as f:
             reader = csv.reader(f, delimiter=',')
-            for i,row in enumerate(reader):
+            for i, row in enumerate(reader):
                 if i == 0:
                     rowStr = ','.join(row)
                     assert rowStr == ModelInformation.header
                 else:
-                    model_id, front, nmaterials, minPoint, maxPoint, aligned_dims, _, variantIds = row
+                    model_id, front, nmaterials, minPoint, \
+                    maxPoint, aligned_dims, _, variantIds = row
                     if model_id in self.model_info:
                         raise Exception('Model %s already exists!' % (model_id))
-                    
+
                     front = np.fromstring(front, dtype=np.float64, sep=',')
                     nmaterials = int(nmaterials)
                     minPoint = np.fromstring(minPoint, dtype=np.float64, sep=',')
                     maxPoint = np.fromstring(maxPoint, dtype=np.float64, sep=',')
                     aligned_dims = np.fromstring(aligned_dims, dtype=np.float64, sep=',')
                     variantIds = variantIds.split(',')
-                    self.model_info[model_id] = {'front':front,
-                                                 'nmaterials':nmaterials,
-                                                 'minPoint':minPoint,
-                                                 'maxPoint':maxPoint,
-                                                 'aligned_dims':aligned_dims,
-                                                 'variantIds':variantIds}
+                    self.model_info[model_id] = {'front': front,
+                                                 'nmaterials': nmaterials,
+                                                 'minPoint': minPoint,
+                                                 'maxPoint': maxPoint,
+                                                 'aligned_dims': aligned_dims,
+                                                 'variantIds': variantIds}
 
     def getModelInfo(self, modelId):
         return self.model_info[ignoreVariant(modelId)]
 
-class ModelCategoryMapping(object):
 
+class ModelCategoryMapping(object):
     def __init__(self, filename):
         self.model_id = []
         self.fine_grained_class = {}
@@ -84,22 +86,24 @@ class ModelCategoryMapping(object):
         self.nyuv2_40class = {}
         self.wnsynsetid = {}
         self.wnsynsetkey = {}
-        
+
         self._parseFromCSV(filename)
-        
+
     def _parseFromCSV(self, filename):
         with open(filename, 'rb') as f:
             reader = csv.reader(f, delimiter=',')
-            for i,row in enumerate(reader):
+            for i, row in enumerate(reader):
                 if i == 0:
                     rowStr = ','.join(row)
                     assert rowStr == MODEL_CATEGORY_MAPPING["header"]
                 else:
-                    _, model_id, fine_grained_class, coarse_grained_class, _, nyuv2_40class, wnsynsetid, wnsynsetkey = row
+                    _, model_id, fine_grained_class, \
+                    coarse_grained_class, _, nyuv2_40class, \
+                    wnsynsetid, wnsynsetkey = row
                     if model_id in self.model_id:
                         raise Exception('Model %s already exists!' % (model_id))
                     self.model_id.append(model_id)
-                    
+
                     self.fine_grained_class[model_id] = fine_grained_class
                     self.coarse_grained_class[model_id] = coarse_grained_class
                     self.nyuv2_40class[model_id] = nyuv2_40class
@@ -110,21 +114,20 @@ class ModelCategoryMapping(object):
         for c in sorted(set(self.fine_grained_class.values())):
             name = c.replace("_", " ")
             print "'%s':'%s'," % (c, name)
-    
+
     def _printCoarseGrainedClassListAsDict(self):
         for c in sorted(set(self.coarse_grained_class.values())):
             name = c.replace("_", " ")
             print "'%s':'%s'," % (c, name)
-    
+
     def getFineGrainedCategoryForModelId(self, modelId):
         return self.fine_grained_class[ignoreVariant(modelId)]
-    
+
     def getCoarseGrainedCategoryForModelId(self, modelId):
         return self.coarse_grained_class[ignoreVariant(modelId)]
-    
+
     def getFineGrainedClassList(self):
         return sorted(set(self.fine_grained_class.values()))
-    
+
     def getCoarseGrainedClassList(self):
         return sorted(set(self.coarse_grained_class.values()))
-    
