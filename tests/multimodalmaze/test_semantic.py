@@ -49,6 +49,15 @@ class TestMaterialColorTable(unittest.TestCase):
         self.assertTrue(len(colorDescriptions) == 1)
         self.assertTrue(colorDescriptions[0] == "silver")
         
+        modelId = '83'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        colorDescriptions = MaterialColorTable.getBasicColorsFromObject(obj, mode='basic')
+        self.assertTrue(len(colorDescriptions) == 1)
+        self.assertTrue(colorDescriptions[0] == "white")
+        
     def testBasicTransparent(self):
         
         modelId = 'sphere'
@@ -75,6 +84,16 @@ class TestMaterialColorTable(unittest.TestCase):
         self.assertTrue(len(colorDescriptions) == 2)
         self.assertTrue(colorDescriptions[0] == "navajo white")
         self.assertTrue(colorDescriptions[1] == "dark slate gray")
+        
+        modelId = '210'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        colorDescriptions = MaterialColorTable.getBasicColorsFromObject(obj, mode='advanced')
+        self.assertTrue(len(colorDescriptions) == 2)
+        self.assertTrue(colorDescriptions[0] == "dark gray")
+        self.assertTrue(colorDescriptions[1] == "cadet blue")
         
     def testXkcd(self):
         

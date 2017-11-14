@@ -34,7 +34,8 @@ import scipy.ndimage
 
 from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
                          GeomVertexReader, GeomTristrips, GeomTriangles, LineStream, SceneGraphAnalyzer, \
-                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState
+                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState,\
+    GeomEnums
                          
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
@@ -515,6 +516,78 @@ def getSurfaceAreaFromGeom(geom, transform=None):
 
     return totalArea
 
+def getColorAttributesFromVertexData(geom, transform=None):
+    
+    colorsTotalAreas = dict()
+    for k in range(geom.getNumPrimitives()):
+        prim = geom.getPrimitive(k)
+        vdata = geom.getVertexData()
+        assert isinstance(prim, (GeomTristrips, GeomTriangles))
+        
+        # Check if color is defined for vertex
+        isColorDefined = False        
+        for i, geomVertexCol in enumerate(vdata.getFormat().getColumns()):
+            if geomVertexCol.getContents() == GeomEnums.CColor:
+                isColorDefined = True
+                break
+        assert isColorDefined
+        
+        vertex = GeomVertexReader(vdata, 'vertex')
+        vertexColor = GeomVertexReader(vdata, 'color')
+                
+        # Decompose into triangles
+        prim = prim.decompose()
+        for p in range(prim.getNumPrimitives()):
+            s = prim.getPrimitiveStart(p)
+            e = prim.getPrimitiveEnd(p)
+            
+            color = None
+            triPts = []
+            for i in range(s, e):
+                vi = prim.getVertex(i)
+                vertex.setRow(vi)
+                vertexColor.setRow(vi)
+                v = vertex.getData3f()
+                
+                # NOTE: all vertex of the same polygon (triangles) should have the same color,
+                #       so only grab it once.
+                if color is None:
+                    color = vertexColor.getData4f()
+                    color = (color[0], color[1], color[2], color[3])
+            
+                triPts.append([v.x, v.y, v.z])
+            triPts = np.array(triPts)
+                
+            # Apply transformation
+            if transform is not None:
+                v = transform.xformPoint(v)
+            
+            # calculate the semi-perimeter and area
+            a = np.linalg.norm(triPts[0] - triPts[1], 2)
+            b = np.linalg.norm(triPts[1] - triPts[2], 2)
+            c = np.linalg.norm(triPts[2] - triPts[0], 2)
+            s = (a + b + c) / 2
+            area = (s*(s-a)*(s-b)*(s-c)) ** 0.5
+            
+            if color in colorsTotalAreas:
+                colorsTotalAreas[color] += area
+            else:
+                colorsTotalAreas[color] = area
+    
+    areas = []        
+    rgbColors = []
+    transparencies = []
+    for color, area in colorsTotalAreas.iteritems():
+        areas.append(area)
+        rgbColors.append(list(color[:3]))
+        
+        # Check transparency
+        isTransparent = color[3] < 1.0
+        transparencies.append(isTransparent)
+            
+    return areas, rgbColors, transparencies
+
+
 def getColorAttributesFromModel(model):
     
     # Calculate the net transformation
@@ -531,10 +604,11 @@ def getColorAttributesFromModel(model):
         for n in range(geomNode.getNumGeoms()):
             state = geomNode.getGeomState(n)
         
-            rgbColor = None
-            texture = None
-            isTransparent = False
+            geom = geomNode.getGeom(n)
+            area = getSurfaceAreaFromGeom(geom, transformMat)
+        
             if state.hasAttrib(TextureAttrib.getClassType()):
+                # Get color from texture
                 texAttr = state.getAttrib(TextureAttrib.getClassType())
                 tex = texAttr.getTexture()
                 
@@ -550,33 +624,47 @@ def getColorAttributesFromModel(model):
                 
                 rgbColor = (np.mean(img, axis=(0,1)) / 255.0).tolist()
 
+                rgbColors.append(rgbColor)
+                transparencies.append(False)
+                areas.append(area)
+                textures.append(texture)
+
             elif state.hasAttrib(ColorAttrib.getClassType()):
                 colorAttr = state.getAttrib(ColorAttrib.getClassType())
-                color = colorAttr.getColor()
                 
-                if isinstance(color, LVecBase4f):
-                    rgbColor= [color[0], color[1], color[2]]
-                    alpha = color[3]
+                if (colorAttr.getColorType() == ColorAttrib.TFlat or colorAttr.getColorType() == ColorAttrib.TOff):
+                    # Get flat color
+                    color = colorAttr.getColor()
                     
-                    if state.hasAttrib(TransparencyAttrib.getClassType()):
-                        transAttr = state.getAttrib(TransparencyAttrib.getClassType())
-                        if transAttr.getMode() != TransparencyAttrib.MNone and alpha < 1.0:
-                            isTransparent = True
-                    elif alpha < 1.0:
-                        isTransparent = True
+                    isTransparent = False
+                    if isinstance(color, LVecBase4f):
+                        rgbColor= [color[0], color[1], color[2]]
+                        alpha = color[3]
                         
-                elif isinstance(color, LVecBase3f):
-                    rgbColor= [color[0], color[1], color[2]]
-                else:
-                    raise Exception('Unsupported color class type: %s' % (color.__class__.__name__))
+                        if state.hasAttrib(TransparencyAttrib.getClassType()):
+                            transAttr = state.getAttrib(TransparencyAttrib.getClassType())
+                            if transAttr.getMode() != TransparencyAttrib.MNone and alpha < 1.0:
+                                isTransparent = True
+                        elif alpha < 1.0:
+                            isTransparent = True
+                            
+                    elif isinstance(color, LVecBase3f):
+                        rgbColor= [color[0], color[1], color[2]]
+                    else:
+                        raise Exception('Unsupported color class type: %s' % (color.__class__.__name__))
                 
-            rgbColors.append(rgbColor)
-            transparencies.append(isTransparent)
-        
-            geom = geomNode.getGeom(n)
-            area = getSurfaceAreaFromGeom(geom, transformMat)
-            areas.append(area)
-            textures.append(texture)
+                    rgbColors.append(rgbColor)
+                    transparencies.append(isTransparent)
+                    areas.append(area)
+                    textures.append(None)
+                
+                else:
+                    # Get colors from vertex data
+                    verAreas, verRgbColors, vertransparencies = getColorAttributesFromVertexData(geom, transformMat)
+                    areas.extend(verAreas)
+                    rgbColors.extend(verRgbColors)
+                    transparencies.extend(vertransparencies)
+                    textures.extend([None,]*len(vertransparencies))
             
     areas = np.array(areas)
     areas /= np.sum(areas)
