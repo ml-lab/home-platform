@@ -34,7 +34,7 @@ TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 
 
 from multimodalmaze.core import Object
 from multimodalmaze.semantic import MaterialColorTable, SuncgSemanticWorld,\
-    MaterialTable
+    MaterialTable, DimensionTable
     
 class TestMaterialColorTable(unittest.TestCase):
     
@@ -122,6 +122,22 @@ class TestMaterialTable(unittest.TestCase):
         materialDescriptions = MaterialTable.getMaterialNameFromObject(obj, thresholdRelArea=0.0)
         self.assertTrue(len(materialDescriptions) == 1)
         self.assertTrue(materialDescriptions[0] == "wood")
+       
+class TestDimensionTable(unittest.TestCase):
+       
+    def testGetDimensionsFromObject(self):
+        
+        modelId = '274'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        
+        # XXX: should use the full metadata files if descriptors are not precomputed
+        modelInfoFilename = os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "models.csv")
+        modelCatFilename = os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "ModelCategoryMapping.csv")
+        dimensionDescription = DimensionTable().getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
+        self.assertTrue(dimensionDescription == 'normal')
        
 class TestSuncgSemanticWorld(unittest.TestCase):
      

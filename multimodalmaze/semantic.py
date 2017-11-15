@@ -33,7 +33,7 @@ from string import digits
 from panda3d.core import Loader, LoaderOptions, NodePath, Filename
 
 from multimodalmaze.constants import MATERIAL_TABLE, MATERIAL_COLOR_TABLE
-from multimodalmaze.suncg import ModelCategoryMapping
+from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation
 from multimodalmaze.rendering import getColorAttributesFromModel
 
 logger = logging.getLogger(__name__)
@@ -140,6 +140,68 @@ class MaterialColorTable(object):
 
         return colorDescriptions
 
+class DimensionTable(object):
+    
+    #NOTE: This table is assumed to be sorted.
+    #      The values are in units of standard deviation (e.g. 2.0 x sigma)
+    overallSizeTable = [ ['tiny', -2.0],
+                          ['small', -1.0],
+                          #['normal', 0.0],
+                          ['large', 1.0],
+                          ['huge', 2.0]]
+    
+    @staticmethod
+    def getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename):
+        
+        modelInfo = ModelInformation(modelInfoFilename)
+        modelCat = ModelCategoryMapping(modelCatFilename)
+        
+        refModelDimensions = None
+        otherSimilarDimensions = []
+        refModelId = str(obj.modelId)
+        refCategory = modelCat.getCoarseGrainedCategoryForModelId(refModelId)
+        for modelId in modelInfo.model_info.keys():
+            category = modelCat.getCoarseGrainedCategoryForModelId(modelId)
+            if refCategory == category:
+                info = modelInfo.getModelInfo(modelId)
+                
+                # FIXME: handle the general case where for the front vector, do not ignore
+                # NOTE: SUNCG is using the Y-up coordinate system
+                frontVec = info['front']
+                if np.count_nonzero(frontVec) > 1 or not np.array_equal(frontVec, [0,0,1]):
+                    continue
+
+                width, height, depth = info['aligned_dims'] / 100.0 # cm to m
+                otherSimilarDimensions.append([width, height, depth])
+                
+                if refModelId == modelId:
+                    refModelDimensions = np.array([width, height, depth])
+                
+        otherSimilarDimensions = np.array(otherSimilarDimensions)
+        logger.debug('Number of similar objects found in dataset: %d' % (otherSimilarDimensions.shape[0]))
+
+        # Volume statistics (assume a gaussian distribution)
+        # XXX: use a more general histogram method to define the categories, rather than simply comparing the deviation to the mean
+        refVolume = np.prod(refModelDimensions)
+        otherVolumes = np.prod(otherSimilarDimensions, axis=-1)
+        mean = np.mean(otherVolumes)
+        std = np.std(otherVolumes)
+        
+        # Compare the deviation to the mean
+        overallSizeTag = None
+        diff = refVolume - mean
+        for tag, threshold in DimensionTable.overallSizeTable:
+            if threshold >= 0.0:
+                if diff > threshold * std:
+                    overallSizeTag = tag
+            else:
+                if diff < threshold * std:
+                    overallSizeTag = tag
+                    
+        if overallSizeTag is None:
+            overallSizeTag = 'normal'
+        
+        return overallSizeTag
 
 class SemanticWorld(object):
     def __init__(self):
