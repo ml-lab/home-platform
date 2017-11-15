@@ -124,8 +124,8 @@ class TestObject(unittest.TestCase):
     
     def testRender(self):
         
-        modelId = '77'
-        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".obj")
+        modelId = '83'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
         assert os.path.exists(modelFilename)
         instanceId = str(modelId) + '-0'
         obj = Object(instanceId, modelId, modelFilename)
@@ -170,6 +170,7 @@ class TestAgent(unittest.TestCase):
         
         self.render.addAgentToScene(agent)
         agent.renderInstance.nodePath.setColor(1,0,0,1)
+        agent.setPosition((0,0,0))
         
         self.render.addDefaultLighting()
         

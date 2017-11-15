@@ -17,10 +17,11 @@
     licensed under WTFPL (http://sam.zoy.org/wtfpl/)
 """
 
-import getopt
+from optparse import OptionParser
 import sys, os
 
-from panda3d.core import Point2D, Point3D, Vec3D, Vec4, GlobPattern, Filename
+from panda3d.core import Point2D, Point3D, Vec3D, Vec4, GlobPattern, Filename,\
+    CSZupRight, CSZupLeft, CSYupRight, CSYupLeft
 from panda3d.egg import EggTexture, EggMaterial, EggVertex, EggData, EggGroup, EggVertexPool, EggPolygon, EggLine
 
 def floats(float_list):
@@ -533,19 +534,19 @@ def obj2egg(infile, outfile=None):
 def main(argv=None):
     if argv is None:
         argv = sys.argv
-    try:
-        opts, args = getopt.getopt(argv[1:], "hn:bs", ["help", "normals", "binormals", "show"])
-    except getopt.error, msg:
-        print msg
-        print __doc__
-        return 2
-    show = False
-    for o, a in opts:
-        if o in ("-h", "--help"):
-            print __doc__
-            return 0
-        elif o in ("-s", "--show"):
-            show = True
+        
+    parser = OptionParser()
+    parser.add_option("-n", "--normals", dest="normals",
+                      help="regenerate normals with provided degree smoothing")
+    parser.add_option("-b", "--binormals", dest="binormals", default=False,
+                      help="make binormals")
+    parser.add_option("-c", "--coordinate-system", dest="coordinate",
+                      help="specific coordinate system")
+    parser.add_option("-s", "--show",
+                      action="store_false", dest="show", default=False,
+                      help="show in pview")
+    (options, args) = parser.parse_args()
+        
     for infile in args:
         try:
             if ".obj" not in infile:
@@ -555,18 +556,36 @@ def main(argv=None):
             egg = obj.toEgg()
             f, e = os.path.splitext(infile)
             outfile = f + ".egg"
-            for o, a in opts:
-                if o in ("-n", "--normals"):
-                    egg.recomputeVertexNormals(float(a))
-                elif o in ("-b", "--binormals"):
-                    egg.recomputeTangentBinormal(GlobPattern(""))
+            
+            if options.normals is not None:
+                egg.recomputeVertexNormals(float(options.normals))
+                
+            if options.binormals:
+                egg.recomputeTangentBinormal(GlobPattern(""))
+
+            if options.coordinate is not None:
+                    
+                a = options.coordinate
+                if a == 'z-up' or a == 'z-up-right':
+                    coordSys = CSZupRight
+                elif a == 'z-up-left':
+                    coordSys = CSZupLeft
+                elif a == 'y-up' or a == 'y-up-right':
+                    coordSys = CSYupRight
+                elif a == 'y-up-left':
+                    coordSys = CSYupLeft
+                else:
+                    raise Exception('Unsupported coordinate system: %s' % (a))
+                
+                egg.setCoordinateSystem(coordSys)
+                    
             egg.removeUnusedVertices(GlobPattern(""))
             if True:
                 egg.triangulatePolygons(EggData.TConvex & EggData.TPolygon)
             if True:
                 egg.recomputePolygonNormals()
             egg.writeEgg(Filename(outfile))
-            if show:
+            if options.show:
                 os.system("pview " + outfile)
         except Exception,e:
             print e

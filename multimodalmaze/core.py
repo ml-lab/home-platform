@@ -298,12 +298,6 @@ class House(object):
                     # 4x4 column-major transformation matrix from object coordinates to scene coordinates
                     transform = np.array(node['transform']).reshape((4,4))
                     
-#                     #FIXME: make sure the position is relative to the center of the object
-#                     minBounds, maxBounds = np.array(node['bbox']['min']), np.array(node['bbox']['max'])
-#                     center = minBounds + (maxBounds - minBounds) / 2.0
-#                     offset = transform[3,:3] - center
-#                     transform[3,:3] -= offset
-                    
                     # Transform from Y-UP to Z-UP coordinate systems
                     yupTransform = np.array([[1, 0, 0, 0],
                                             [0, 0, -1, 0],

@@ -96,7 +96,7 @@ class BasicEnvironment(object):
     def generateOccupancyMap(self, minRegionArea=10.0, z=1.0, precision=0.1):
     
         cellArea = precision**2
-        occupancyMap, occupancyMapCoord = self.physicWorld.calculate2dNavigationMap(self.agent, z=1.0, precision=precision)
+        occupancyMap, occupancyMapCoord = self.physicWorld.calculate2dNavigationMap(self.agent, z=z, precision=precision)
         labeledNavMap = extractAllRegions(occupancyMap)
         
         # Post-processing by removing regions smaller than the threshold

@@ -2,6 +2,8 @@
 
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
+export PYTHONPATH=$DIR/../:$PYTHONPATH
+
 # Convert test models
 $DIR/../scripts/convert_suncg.sh "$DIR/data/models"
 
