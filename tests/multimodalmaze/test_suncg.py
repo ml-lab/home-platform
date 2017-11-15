@@ -32,7 +32,7 @@ import unittest
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation
+from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation, ObjectVoxelData
 
 class TestModelCategoryMapping(unittest.TestCase):
 
@@ -47,6 +47,16 @@ class TestModelInformation(unittest.TestCase):
     def testGetModelInfo(self):
         info = ModelInformation(os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "models.csv"))
         _ = info.getModelInfo('261')
+        
+class TestObjectVoxelData(unittest.TestCase):
+    
+    def testGetFilledVolume(self):
+        
+        for modelId in ['83', '81', '561', '441', '317']:
+            voxelData = ObjectVoxelData.fromFile(os.path.join(TEST_SUNCG_DATA_DIR, "object_vox", "object_vox_data", modelId, modelId + ".binvox"))
+            volume = voxelData.getFilledVolume()
+            self.assertTrue(np.array_equal(voxelData.voxels.shape, [128,128,128]))
+            self.assertTrue(volume > 0)
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

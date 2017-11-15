@@ -33,6 +33,8 @@ from panda3d.core import Vec3, Mat4, LoaderOptions, Filename, NodePath, Loader, 
 from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
                             BulletDebugNode, BulletCapsuleShape, BulletConvexHullShape, BulletBodyNode
 
+from multimodalmaze.suncg import ObjectVoxelData, ModelCategoryMapping
+
 logger = logging.getLogger(__name__)
 
 class PhysicObject(object):
@@ -186,7 +188,24 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
                             's__1770','s__1771','s__1772','s__1773',
                          ]
 
-    def __init__(self, debug=False):
+    # FIXME: is not a complete list of movable objects
+    movableObjectCategories = ['table', 'dressing_table', 'sofa', 'trash_can', 'chair', 'ottoman', 'bed']
+
+    # For more material, see table: http://www.ambrsoft.com/CalcPhysics/Density/Table_2.htm
+    defaultDensity = 1000.0 #kg/m^3
+
+    # For more coefficients, see table: https://www.thoughtspike.com/friction-coefficients-for-bullet-physics/
+    defaultMaterialFriction = 0.7
+    
+    defaultMaterialRestitution = 0.5
+
+    def __init__(self, suncgDatasetRoot=None, debug=False):
+
+        self.suncgDatasetRoot = suncgDatasetRoot
+        if suncgDatasetRoot is not None:
+            self.modelCatMapping = ModelCategoryMapping(os.path.join(suncgDatasetRoot, "metadata", "ModelCategoryMapping.csv"))
+        else:
+            self.modelCatMapping = None
 
         self.physicWorld = BulletWorld()
         self.physicWorld.setGravity(Vec3(0, 0, -9.81))
@@ -216,7 +235,7 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
             raise IOError('Could not load model file: %s' % (modelPath))
         return nodePath
     
-    def addAgentToScene(self, agent, radius=0.1, height=1.6, mode='capsule'):
+    def addAgentToScene(self, agent, radius=0.1, height=1.6, mass=60.0, mode='capsule'):
         
         transform = TransformState.makeIdentity()
         if agent.modelFilename is not None:
@@ -230,8 +249,10 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
             shape = BulletCapsuleShape(radius, 2*radius)
             
         node = BulletRigidBodyNode('agent-' + str(agent.instanceId))
-        node.setMass(1.0)
+        node.setMass(mass)
         node.setStatic(False)
+        node.setFriction(self.defaultMaterialFriction)
+        node.setRestitution(self.defaultMaterialRestitution)
         node.addShape(shape)
         
         # Constrain the agent to have fixed position on the Z-axis
@@ -260,10 +281,28 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         # XXX: we could create BulletGhostNode instance for non-collidable objects, but we would need to filter out the collisions later on
         if not obj.modelId in self.openedDoorModelIds:
             node = BulletRigidBodyNode('object-' + str(obj.instanceId))
-            node.setMass(0.0)
+            
+            if self.suncgDatasetRoot is not None:
+                
+                # Check if it is a movable object
+                category = self.modelCatMapping.getCoarseGrainedCategoryForModelId(obj.modelId)
+                if category in self.movableObjectCategories:
+                    # Estimate mass of object based on volumetric data and default material density
+                    objVoxFilename = os.path.join(self.suncgDatasetRoot, 'object_vox', 'object_vox_data', str(obj.modelId), str(obj.modelId) + '.binvox')
+                    voxelData = ObjectVoxelData.fromFile(objVoxFilename)
+                    mass = Panda3dBulletPhysicWorld.defaultDensity * voxelData.getFilledVolume()
+                    node.setMass(mass)
+                else:
+                    node.setMass(0.0)
+                    node.setStatic(True)
+            else:
+                node.setMass(0.0)
+                node.setStatic(True)
+            
+            node.setFriction(self.defaultMaterialFriction)
+            node.setRestitution(self.defaultMaterialRestitution)
             node.addShape(shape)
             node.setIntoCollideMask(BitMask32.allOn())
-            node.setStatic(True)
             node.setDeactivationEnabled(False)
                 
             model.detachNode()
@@ -290,6 +329,8 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
             shape, _ = getCollisionShapeFromModel(model, mode='mesh')
             node = BulletRigidBodyNode('room-' + str(room.instanceId) + '-' + partId)
             node.setMass(0.0)
+            node.setFriction(self.defaultMaterialFriction)
+            node.setRestitution(self.defaultMaterialRestitution)
             node.setStatic(True)
             node.addShape(shape)
             node.setDeactivationEnabled(False)
