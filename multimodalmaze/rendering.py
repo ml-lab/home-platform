@@ -32,9 +32,10 @@ import logging
 import numpy as np
 import scipy.ndimage
 
-from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, CS_yup_right, CS_zup_right, \
+from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
                          GeomVertexReader, GeomTristrips, GeomTriangles, LineStream, SceneGraphAnalyzer, \
-                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib
+                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState,\
+    GeomEnums
                          
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
@@ -43,42 +44,71 @@ logger = logging.getLogger(__name__)
 
 MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "models")
 
+class RenderObject(object):
+   
+    def getTransform(self):
+        return NotImplementedError()
+
+    def setTransform(self):
+        return NotImplementedError()
+
 class RenderWorld(object):
 
-    def __init__(self):
-        pass
-
     def addAgentToScene(self, agent):
-        pass
+        return NotImplementedError()
 
     def addObjectToScene(self, obj):
-        pass
+        return NotImplementedError()
     
     def addRoomToScene(self, room):
-        pass
+        return NotImplementedError()
     
     def addHouseToScene(self, house):
-        pass
+        return NotImplementedError()
 
     def step(self, time):
-        pass
+        return NotImplementedError()
     
     def resetScene(self):
-        pass
+        return NotImplementedError()
 
-#TODO: add support for multithreading?
-#      see: https://www.panda3d.org/manual/index.php/Multithreaded_Render_Pipeline
 
+class Panda3dRenderObject(RenderObject):
+    
+    def __init__(self, nodePath, recenterTransform=None):
+        self.nodePath = nodePath
+    
+        if recenterTransform is None:
+            recenterTransform = TransformState.makeIdentity()
+        self.recenterTransform = recenterTransform
+    
+    def getTransform(self):
+        transform = self.nodePath.node().getTransform()
+        mat = transform.compose(TransformState.makePos(-self.recenterTransform.getPos())).getMat()
+        return np.array([[mat[0][0], mat[0][1], mat[0][2], mat[0][3]],
+                         [mat[1][0], mat[1][1], mat[1][2], mat[1][3]],
+                         [mat[2][0], mat[2][1], mat[2][2], mat[2][3]],
+                         [mat[3][0], mat[3][1], mat[3][2], mat[3][3]]])
+
+    def setTransform(self, transform):
+        mat = Mat4(*transform.ravel())
+        self.nodePath.setTransform(TransformState.makeMat(mat).compose(self.recenterTransform))
+
+    def getRecenterPosition(self):
+        position = self.recenterTransform.getPos()
+        return np.array([position.x, position.y, position.z])
 
 class Panda3dRenderWorld(RenderWorld):
 
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=True, showCeiling=True, mode='offscreen'):
+    def __init__(self, size=(512,512), shadowing=True, showCeiling=True, mode='offscreen', zNear=1.0, zFar=1000.0):
         
         self.size = size
         self.mode = mode
+        self.zNear = zNear
+        self.zFar = zFar
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
         self.graphicsEngine.setDefaultLoader(self.loader)
@@ -99,17 +129,17 @@ class Panda3dRenderWorld(RenderWorld):
         self._initRgbCapture()
         self._initDepthCapture()
         
-        self.graphicsEngine.openWindows()
-        
         self.__dict__.update(shadowing=shadowing, showCeiling=showCeiling)
+
+        self.agent = None
 
     def _initRgbCapture(self):
 
         camNode = Camera('RGB camera')
         lens = PerspectiveLens()
         lens.setAspectRatio(1.0)
-        #lens.setNear(5.0)
-        #lens.setFar(500.0)
+        lens.setNear(self.zNear)
+        lens.setFar(self.zFar)
         camNode.setLens(lens)
         camNode.setScene(self.render)
         cam = self.camera.attachNewNode(camNode)
@@ -144,6 +174,7 @@ class Panda3dRenderWorld(RenderWorld):
         tex.setFormat(Texture.FRgb8)
         tex.setComponentType(Texture.TUnsignedByte)
         buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
+        #XXX: should use tex.setMatchFramebufferFormat(True)?
         
         self.rgbBuffer = buf
         self.rgbTex = tex
@@ -153,8 +184,8 @@ class Panda3dRenderWorld(RenderWorld):
         camNode = Camera('Depth camera')
         lens = PerspectiveLens()
         lens.setAspectRatio(1.0)
-        #lens.setNear(5.0)
-        #lens.setFar(500.0)
+        lens.setNear(self.zNear)
+        lens.setFar(self.zFar)
         camNode.setLens(lens)
         camNode.setScene(self.render)
         cam = self.camera.attachNewNode(camNode)
@@ -194,7 +225,8 @@ class Panda3dRenderWorld(RenderWorld):
         tex.setFormat(Texture.FDepthComponent)
         tex.setComponentType(Texture.TFloat)
         buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPDepth)
-    
+        #XXX: should use tex.setMatchFramebufferFormat(True)?
+        
         self.depthBuffer = buf
         self.depthTex = tex
         
@@ -205,18 +237,48 @@ class Panda3dRenderWorld(RenderWorld):
     def getRgbImage(self, channelOrder="RGB"):
         data = self.rgbTex.getRamImageAs(channelOrder)
         image = np.frombuffer(data.get_data(), np.uint8) # Must match Texture.TUnsignedByte
-        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
+        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), 3)
         image = np.flipud(image)
         return image
     
-    def getDepthImage(self):
-        data = self.depthTex.getRamImage()
-        depthImage = np.frombuffer(data.get_data(), np.float32) # Must match Texture.TFloat
-        depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize(), self.depthTex.getNumComponents())
+    def getDepthImage(self, mode='normalized'):
+        data = self.depthTex.getRamImage().get_data()
+        nbBytesComponentFromData = len(data) / (self.depthTex.getYSize() * self.depthTex.getXSize())
+        if nbBytesComponentFromData == 4:
+            depthImage = np.frombuffer(data, np.float32) # Must match Texture.TFloat
+        elif nbBytesComponentFromData == 2:
+            # NOTE: This can happen on some graphic hardware, where unsigned 16-bit data is stored
+            #       despite setting the texture component type to 32-bit floating point.
+            depthImage = np.frombuffer(data, np.uint16).astype()
+            depthImage = depthImage.astype(np.float32) / 65535
+            
+        depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize())
         depthImage = np.flipud(depthImage)
+        
+        if mode == 'distance':
+            # NOTE: in Panda3d, the returned depth image seems to be already linearized
+            depthImage = self.zNear + depthImage / (self.zFar - self.zNear)
+
+            # Adapted from: https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
+            #depthImage = 2.0 * depthImage - 1.0
+            #depthImage = 2.0 * self.zNear * self.zFar / (self.zFar + self.zNear - depthImage * (self.zFar - self.zNear))
+            
+        elif mode == 'normalized':
+            # Nothing to do
+            pass
+        else:
+            raise Exception('Unsupported output depth image mode: %s' % (mode))
+        
         return depthImage
 
     def step(self):
+        
+        # Update position of camera based on agent
+        if self.agent is not None:
+            transform = self.agent.transform
+            mat = Mat4(*transform.ravel())
+            self.camera.setMat(mat)
+        
         self.graphicsEngine.renderFrame()
         
         #NOTE: we need to call frame rendering twice in onscreen mode because of double-buffering
@@ -285,65 +347,61 @@ class Panda3dRenderWorld(RenderWorld):
     
     def addAgentToScene(self, agent):
         
-        node = self.scene.attachNewNode('agent-' + str(agent.instanceId))
+        if not self.agent is None:
+            raise NotImplementedError('Agent already present in the scene. Support for multiple agents is not yet available')
+        
+        nodePath = self.scene.attachNewNode('agent-' + str(agent.instanceId))
+        nodePath.reparentTo(self.scene)
+        
         if agent.modelFilename is not None:
             model = self._loadModel(agent.modelFilename)
-            model.reparentTo(node)
+            model.reparentTo(nodePath)
+            
+            instance = Panda3dRenderObject(nodePath)
+            agent.setRenderObject(instance)
+        else:
+            instance = Panda3dRenderObject(nodePath)
+            agent.setRenderObject(instance)
         
-        node.reparentTo(self.scene)
-        return node
+        agent.assertConsistency()
+        
+        self.agent = agent
         
     def addObjectToScene(self, obj):
 
-        node = self.scene.attachNewNode('object-' + str(obj.instanceId))
+        nodePath = self.scene.attachNewNode('object-' + str(obj.instanceId))
         model = self._loadModel(obj.modelFilename)
-        model.reparentTo(node)
+        model.reparentTo(nodePath)
         
-        if obj.transform is not None:
-            # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-            transformMat = Mat4(*obj.transform.ravel())
-            yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-            zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-            model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
+        instance = Panda3dRenderObject(nodePath)
+        obj.setRenderObject(instance)
         
-        #node.reparentTo(self.scene)
-        return model
-    
+        obj.assertConsistency()
+        
     def addRoomToScene(self, room):
 
-        node = self.scene.attachNewNode('room-' + str(room.instanceId))
         for modelFilename in room.modelFilenames:
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
-            objNode = node.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
+            objNodePath = self.scene.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
             model = self._loadModel(modelFilename)
-            model.reparentTo(objNode)
+            model.reparentTo(objNodePath)
             
             if not self.showCeiling and 'c' in os.path.basename(modelFilename):
-                objNode.hide()
+                objNodePath.hide()
                 
         for idx, obj in enumerate(room.objects):
-            objNode = self.addObjectToScene(obj)
-            obj.location = objNode.getPos()
+            self.addObjectToScene(obj)
             room.objects[idx] = obj
-            objNode.reparentTo(node)
-            
-        return node
     
     def addHouseToScene(self, house):
 
-        node = self.scene.attachNewNode('house-' + str(house.instanceId))
-    
         for room in house.rooms:
-            roomNode = self.addRoomToScene(room)
-            roomNode.reparentTo(node)
+            self.addRoomToScene(room)
         
         for idx, obj in enumerate(house.objects):
-            objNode = self.addObjectToScene(obj)
-            obj.location = objNode.getPos()
+            self.addObjectToScene(obj)
             house.objects[idx] = obj
-            objNode.reparentTo(node)
-        return node
 
     def resetScene(self):
         # FIXME: find out why this function outputs a lot of logs to STDERR 
@@ -458,6 +516,78 @@ def getSurfaceAreaFromGeom(geom, transform=None):
 
     return totalArea
 
+def getColorAttributesFromVertexData(geom, transform=None):
+    
+    colorsTotalAreas = dict()
+    for k in range(geom.getNumPrimitives()):
+        prim = geom.getPrimitive(k)
+        vdata = geom.getVertexData()
+        assert isinstance(prim, (GeomTristrips, GeomTriangles))
+        
+        # Check if color is defined for vertex
+        isColorDefined = False        
+        for i, geomVertexCol in enumerate(vdata.getFormat().getColumns()):
+            if geomVertexCol.getContents() == GeomEnums.CColor:
+                isColorDefined = True
+                break
+        assert isColorDefined
+        
+        vertex = GeomVertexReader(vdata, 'vertex')
+        vertexColor = GeomVertexReader(vdata, 'color')
+                
+        # Decompose into triangles
+        prim = prim.decompose()
+        for p in range(prim.getNumPrimitives()):
+            s = prim.getPrimitiveStart(p)
+            e = prim.getPrimitiveEnd(p)
+            
+            color = None
+            triPts = []
+            for i in range(s, e):
+                vi = prim.getVertex(i)
+                vertex.setRow(vi)
+                vertexColor.setRow(vi)
+                v = vertex.getData3f()
+                
+                # NOTE: all vertex of the same polygon (triangles) should have the same color,
+                #       so only grab it once.
+                if color is None:
+                    color = vertexColor.getData4f()
+                    color = (color[0], color[1], color[2], color[3])
+            
+                triPts.append([v.x, v.y, v.z])
+            triPts = np.array(triPts)
+                
+            # Apply transformation
+            if transform is not None:
+                v = transform.xformPoint(v)
+            
+            # calculate the semi-perimeter and area
+            a = np.linalg.norm(triPts[0] - triPts[1], 2)
+            b = np.linalg.norm(triPts[1] - triPts[2], 2)
+            c = np.linalg.norm(triPts[2] - triPts[0], 2)
+            s = (a + b + c) / 2
+            area = (s*(s-a)*(s-b)*(s-c)) ** 0.5
+            
+            if color in colorsTotalAreas:
+                colorsTotalAreas[color] += area
+            else:
+                colorsTotalAreas[color] = area
+    
+    areas = []        
+    rgbColors = []
+    transparencies = []
+    for color, area in colorsTotalAreas.iteritems():
+        areas.append(area)
+        rgbColors.append(list(color[:3]))
+        
+        # Check transparency
+        isTransparent = color[3] < 1.0
+        transparencies.append(isTransparent)
+            
+    return areas, rgbColors, transparencies
+
+
 def getColorAttributesFromModel(model):
     
     # Calculate the net transformation
@@ -474,10 +604,11 @@ def getColorAttributesFromModel(model):
         for n in range(geomNode.getNumGeoms()):
             state = geomNode.getGeomState(n)
         
-            rgbColor = None
-            texture = None
-            isTransparent = False
+            geom = geomNode.getGeom(n)
+            area = getSurfaceAreaFromGeom(geom, transformMat)
+        
             if state.hasAttrib(TextureAttrib.getClassType()):
+                # Get color from texture
                 texAttr = state.getAttrib(TextureAttrib.getClassType())
                 tex = texAttr.getTexture()
                 
@@ -493,33 +624,47 @@ def getColorAttributesFromModel(model):
                 
                 rgbColor = (np.mean(img, axis=(0,1)) / 255.0).tolist()
 
+                rgbColors.append(rgbColor)
+                transparencies.append(False)
+                areas.append(area)
+                textures.append(texture)
+
             elif state.hasAttrib(ColorAttrib.getClassType()):
                 colorAttr = state.getAttrib(ColorAttrib.getClassType())
-                color = colorAttr.getColor()
                 
-                if isinstance(color, LVecBase4f):
-                    rgbColor= [color[0], color[1], color[2]]
-                    alpha = color[3]
+                if (colorAttr.getColorType() == ColorAttrib.TFlat or colorAttr.getColorType() == ColorAttrib.TOff):
+                    # Get flat color
+                    color = colorAttr.getColor()
                     
-                    if state.hasAttrib(TransparencyAttrib.getClassType()):
-                        transAttr = state.getAttrib(TransparencyAttrib.getClassType())
-                        if transAttr.getMode() != TransparencyAttrib.MNone and alpha < 1.0:
-                            isTransparent = True
-                    elif alpha < 1.0:
-                        isTransparent = True
+                    isTransparent = False
+                    if isinstance(color, LVecBase4f):
+                        rgbColor= [color[0], color[1], color[2]]
+                        alpha = color[3]
                         
-                elif isinstance(color, LVecBase3f):
-                    rgbColor= [color[0], color[1], color[2]]
-                else:
-                    raise Exception('Unsupported color class type: %s' % (color.__class__.__name__))
+                        if state.hasAttrib(TransparencyAttrib.getClassType()):
+                            transAttr = state.getAttrib(TransparencyAttrib.getClassType())
+                            if transAttr.getMode() != TransparencyAttrib.MNone and alpha < 1.0:
+                                isTransparent = True
+                        elif alpha < 1.0:
+                            isTransparent = True
+                            
+                    elif isinstance(color, LVecBase3f):
+                        rgbColor= [color[0], color[1], color[2]]
+                    else:
+                        raise Exception('Unsupported color class type: %s' % (color.__class__.__name__))
                 
-            rgbColors.append(rgbColor)
-            transparencies.append(isTransparent)
-        
-            geom = geomNode.getGeom(n)
-            area = getSurfaceAreaFromGeom(geom, transformMat)
-            areas.append(area)
-            textures.append(texture)
+                    rgbColors.append(rgbColor)
+                    transparencies.append(isTransparent)
+                    areas.append(area)
+                    textures.append(None)
+                
+                else:
+                    # Get colors from vertex data
+                    verAreas, verRgbColors, vertransparencies = getColorAttributesFromVertexData(geom, transformMat)
+                    areas.extend(verAreas)
+                    rgbColors.extend(verRgbColors)
+                    transparencies.extend(vertransparencies)
+                    textures.extend([None,]*len(vertransparencies))
             
     areas = np.array(areas)
     areas /= np.sum(areas)

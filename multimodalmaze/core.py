@@ -32,29 +32,158 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-class Agent(object):
-    
-    def __init__(self, instanceId, modelFilename=None, transform=None):
-        self.instanceId = instanceId
-        self.transform = transform
-        self.modelFilename = modelFilename
-        self.attributes = {}
+def eulerToMatrix(theta):
+    # Adapted from: https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+    R_x = np.array([[1,         0,                  0                   ],
+                [0,         np.cos(theta[0]), -np.sin(theta[0]) ],
+                [0,         np.sin(theta[0]), np.cos(theta[0])  ]
+                ])
+                 
+    R_y = np.array([[np.cos(theta[1]),    0,      np.sin(theta[1])  ],
+                    [0,                     1,      0                   ],
+                    [-np.sin(theta[1]),   0,      np.cos(theta[1])  ]
+                    ])
+                 
+    R_z = np.array([[np.cos(theta[2]),    -np.sin(theta[2]),    0],
+                    [np.sin(theta[2]),    np.cos(theta[2]),     0],
+                    [0,                     0,                      1]
+                    ])
+                     
+    R = np.dot(R_z, np.dot( R_y, R_x ))
+    return R
 
-    def clearAttributes(self):
-        self.attributes.clear()
+def isRotationMatrix(R):
+    # Adapted from: https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+    Rt = np.transpose(R)
+    shouldBeIdentity = np.dot(Rt, R)
+    I = np.identity(3, dtype = R.dtype)
+    n = np.linalg.norm(I - shouldBeIdentity)
+    return n < 1e-6
+
+def matrixToEuler(R):
+    # Adapted from: https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+    assert(isRotationMatrix(R))
+    sy = np.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+ 
+    singular = sy < 1e-6
+    if  not singular :
+        x = np.arctan2(R[2,1] , R[2,2])
+        y = np.arctan2(-R[2,0], sy)
+        z = np.arctan2(R[1,0], R[0,0])
+    else :
+        x = np.arctan2(-R[1,2], R[1,1])
+        y = np.arctan2(-R[2,0], sy)
+        z = 0
+ 
+    return np.array([x, y, z])
+    
 
 class Object(object):
     
-    def __init__(self, instanceId, modelId, modelFilename, parentRoom=None, transform=None):
+    def __init__(self, instanceId, modelId=None, modelFilename=None, static=False):
         self.instanceId = instanceId
         self.modelId = modelId
-        self.parentRoom = parentRoom
-        self.transform = transform
         self.modelFilename = modelFilename
         self.attributes = {}
+        self.static = static
 
+        self.transform = np.eye(4,4)
+
+        self.physicInstance = None
+        self.renderInstance = None
+        self.acousticInstance = None
+
+    def setTransform(self, transform):
+        transform = np.atleast_2d(transform)
+        assert transform.ndim == 2
+        assert transform.shape[0] == transform.shape[1] == 4
+        
+        self.transform = transform
+        if self.physicInstance is not None:
+            self.physicInstance.setTransform(self.transform)
+        if self.renderInstance is not None:
+            self.renderInstance.setTransform(self.transform)
+        if self.acousticInstance is not None:
+            self.acousticInstance.setTransform(self.transform)
+
+    def setPosition(self, position):
+        position = np.atleast_1d(position)
+        assert len(position) == 3
+        self.transform[-1,:3] = position
+
+        if self.physicInstance is not None:
+            self.physicInstance.setTransform(self.transform)
+        if self.renderInstance is not None:
+            self.renderInstance.setTransform(self.transform)
+        if self.acousticInstance is not None:
+            self.acousticInstance.setTransform(self.transform)
+            
+    def setLinearVelocity(self, velocity):
+        if self.physicInstance is not None:
+            self.physicInstance.setLinearVelocity(velocity)
+    
+    def setAngularVelocity(self, velocity):
+        if self.physicInstance is not None:
+            self.physicInstance.setAngularVelocity(velocity)
+            
+    def isCollision(self):
+        isCollisionDetected = False
+        if self.physicInstance is not None:
+            isCollisionDetected = self.physicInstance.isCollision()
+        return isCollisionDetected
+            
+    def getPosition(self):
+        return self.transform[-1,:3]
+    
+    def getOrientation(self):
+        return matrixToEuler(self.transform[:3,:3])
+    
+    def setOrientation(self, theta):
+        self.transform[:3,:3] = eulerToMatrix(theta)
+    
     def clearAttributes(self):
         self.attributes.clear()
+
+    def _syncTransform(self):
+        # Get updated transform from the physic instance
+        if self.physicInstance is not None:
+            self.transform = self.physicInstance.getTransform()
+            
+        # Apply it to all other instances (rendering, acoustics)
+        if self.renderInstance is not None:
+            self.renderInstance.setTransform(self.transform)
+        if self.acousticInstance is not None:
+            self.acousticInstance.setTransform(self.transform)
+
+    def assertConsistency(self, atol=1e-6):
+        if self.physicInstance is not None:
+            assert np.allclose(self.transform, self.physicInstance.getTransform(), atol=atol)
+        if self.renderInstance is not None:
+            assert np.allclose(self.transform, self.renderInstance.getTransform(), atol=atol)
+        if self.acousticInstance is not None:
+            assert np.allclose(self.transform, self.acousticInstance.getTransform(), atol=atol)
+            
+    def setPhysicObject(self, instance):
+        self.physicInstance = instance
+        self.physicInstance.setTransform(self.transform)
+        
+    def setAcousticObject(self, instance):
+        self.acousticInstance = instance
+        self.acousticInstance.setTransform(self.transform)
+        
+    def setRenderObject(self, instance):
+        self.renderInstance = instance
+        self.renderInstance.setTransform(self.transform)
+
+class Agent(Object):
+    
+    def __init__(self, instanceId, modelFilename=None):
+        super(Agent, self).__init__(instanceId, None, modelFilename, static=False)
+
+    #TODO: support full transform here?
+    def setCameraOrientation(self, theta):
+        if self.renderInstance is not None:
+            self.renderInstance.setCameraOrientation(theta)
 
 class Room(object):
 
@@ -68,9 +197,29 @@ class Room(object):
             objects = []
         self.objects = objects
         self.attributes = {}
+        
+        self.transform = np.eye(4,4)
+        
+        self.physicInstance = None
+        self.renderInstance = None
+        self.acousticInstance = None
 
     def clearAttributes(self):
         self.attributes.clear()
+    
+    def setPhysicObject(self, instance):
+        self.physicInstance = instance
+        #self.physicInstance.setTransform(self.transform)
+        
+    def setAcousticObject(self, instance):
+        self.acousticInstance = instance
+        #self.acousticInstance.setTransform(self.transform)
+        
+    def setRenderObject(self, instance):
+        self.renderInstance = instance
+        #self.renderInstance.setTransform(self.transform)
+    
+#TODO: add support for multiple levels
     
 class House(object):
     
@@ -106,6 +255,7 @@ class House(object):
         rooms = []
         sceneId = data['id']
         for levelId, level in enumerate(data['levels']):
+            logger.debug('Loading Level %s to scene' % (str(levelId)))
             
             roomByNodeIndex = {}
             for nodeIndex, node in enumerate(level['nodes']):
@@ -120,7 +270,7 @@ class House(object):
                     modelFilenames = []
                     for roomObjFilename in glob.glob(os.path.join(datasetRoot, 'room', sceneId, modelId + '*.obj')):
                         
-                        # Convert from OBJ + MTL to EGG format
+                        # Convert extension from OBJ + MTL to EGG format
                         f, _ = os.path.splitext(roomObjFilename)
                         modelFilename = f + ".egg"
                         if not os.path.exists(modelFilename):
@@ -137,16 +287,29 @@ class House(object):
                     
                     logger.debug('Loading Object %s to scene' % (modelId))
                     
-                    # Convert from OBJ + MTL to EGG format
+                    # Convert extension from OBJ + MTL to EGG format
                     objFilename = os.path.join(datasetRoot, 'object', node['modelId'], node['modelId'] + '.obj')
                     assert os.path.exists(objFilename)
                     f, _ = os.path.splitext(objFilename)
                     modelFilename = f + ".egg"
                     if not os.path.exists(modelFilename):
                         raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
-                     
+                    
                     # 4x4 column-major transformation matrix from object coordinates to scene coordinates
                     transform = np.array(node['transform']).reshape((4,4))
+                    
+                    # Transform from Y-UP to Z-UP coordinate systems
+                    yupTransform = np.array([[1, 0, 0, 0],
+                                            [0, 0, -1, 0],
+                                            [0, 1, 0, 0],
+                                            [0, 0, 0, 1]])
+                    
+                    zupTransform = np.array([[1, 0, 0, 0],
+                                            [0, 0, 1, 0],
+                                            [0, -1, 0, 0],
+                                            [0, 0, 0, 1]])
+                    
+                    transform = np.dot(np.dot(yupTransform, transform), zupTransform)
                     
                     # Instance identification
                     if modelId in objectIds:
@@ -155,13 +318,16 @@ class House(object):
                         objectIds[modelId] = 0
                     instanceId = modelId + '-' + str(objectIds[modelId])
                     
+                    obj = Object(instanceId, modelId, modelFilename)
+                    obj.setTransform(transform)
+                    
+                    room = None
                     if nodeIndex in roomByNodeIndex:
                         room = roomByNodeIndex[nodeIndex]
-                        obj = Object(instanceId, modelId, modelFilename, room, transform)
                         room.objects.append(obj)
-                    else:
-                        obj = Object(instanceId, modelId, modelFilename, None, transform)
-                        objects.append(obj)
+
+                    obj.attributes['room'] = room
+                    obj.attributes['level'] = levelId
                 else:
                     raise Exception('Unsupported node type: %s' % (node['type']))
                 

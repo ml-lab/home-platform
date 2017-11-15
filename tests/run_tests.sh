@@ -2,8 +2,7 @@
 
 DIR=$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )
 
-# Convert test models
-$DIR/../scripts/convert_suncg.sh "$DIR/data/models"
+export PYTHONPATH=$DIR/../:$PYTHONPATH
 
 # Convert SUNCG test data
 $DIR/../scripts/convert_suncg.sh "$DIR/data/suncg"

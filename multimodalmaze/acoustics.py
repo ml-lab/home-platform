@@ -656,9 +656,6 @@ class EvertAcousticWorld(AcousticWorld):
                  materialAbsorption=True, frequencyDependent=True,
                  size=(512,512), showCeiling=True):
 
-        #FIXME: no need to store those, since EVERT is correctly performing the validation after bug fixed.
-        self.acousticTriangles = []
-
         self.samplingRate = samplingRate
         self.maximumOrder = maximumOrder
         self.materialAbsorption = materialAbsorption
@@ -684,6 +681,8 @@ class EvertAcousticWorld(AcousticWorld):
     
         self.sources = []
         self.sourceNodesByInstanceId = dict()
+        
+        self.nbTotalRejectedAcousticPolygons = 0
     
     def _initRender(self, size, showCeiling):
         # Rendering attributes
@@ -1262,21 +1261,17 @@ class EvertAcousticWorld(AcousticWorld):
             # Add polygons to EVERT engine
             #TODO: for bounding box approximations, we could reduce the number of triangles by
             #      half if each face of the box was modelled as a single rectangular polygon.
-            polygons, triangles = getAcousticPolygonsFromModel(model)
+            polygons, _ = getAcousticPolygonsFromModel(model)
             for polygon in polygons:
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
-            if len(self.acousticTriangles) == 0:
-                self.acousticTriangles = get3DTrianglesFromModel(model)
-            else:
-                self.acousticTriangles = np.concatenate((self.acousticTriangles, get3DTrianglesFromModel(model)))
     
         return node
     
     def addRoomToScene(self, room, ignoreObjects=False):
 
         node = self.scene.attachNewNode('room-' + str(room.instanceId))
-        nbRejectedPolygons = 0
+        nbRejectedAcousticPolygons = 0
         for modelFilename in room.modelFilenames:
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
@@ -1306,23 +1301,20 @@ class EvertAcousticWorld(AcousticWorld):
                 dims = np.max(triangle, axis=0) - np.min(triangle, axis=0)
                 s = np.sum(np.array(dims > self.minWidthThresholdPolygons, dtype=np.int))
                 if s < 2:
-                    nbRejectedPolygons += 1
+                    nbRejectedAcousticPolygons += 1
                     continue
                 
                 polygon.setMaterialId(materialId)
                 self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
-            if len(self.acousticTriangles) == 0:
-                self.acousticTriangles = get3DTrianglesFromModel(model)
-            else:
-                self.acousticTriangles = np.concatenate((self.acousticTriangles, get3DTrianglesFromModel(model)))
             
         if not ignoreObjects:
             for obj in room.objects:
                 objNode = self.addObjectToScene(obj)
                 objNode.reparentTo(node)
             
-        logger.debug('Number of rejected polygons: %d' % (nbRejectedPolygons))
-            
+        logger.debug('Number of rejected polygons: %d' % (nbRejectedAcousticPolygons))
+        self.nbTotalRejectedAcousticPolygons += nbRejectedAcousticPolygons
+        
         return node
 
     def addHouseToScene(self, house, ignoreObjects=False):

@@ -26,118 +26,17 @@
 
 import os
 import logging
-import scipy.ndimage
 import numpy as np
 
 from string import digits
 
-from panda3d.core import GeomVertexReader, GeomTristrips, GeomTriangles, ColorAttrib, TextureAttrib, TransparencyAttrib, \
-    LVecBase4f, LVecBase3f
 from panda3d.core import Loader, LoaderOptions, NodePath, Filename
 
 from multimodalmaze.constants import MATERIAL_TABLE, MATERIAL_COLOR_TABLE
-from multimodalmaze.suncg import ModelCategoryMapping
+from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation
+from multimodalmaze.rendering import getColorAttributesFromModel
 
 logger = logging.getLogger(__name__)
-
-
-def getSurfaceAreaFromGeom(geom):
-    totalArea = 0.0
-    for k in range(geom.getNumPrimitives()):
-        prim = geom.getPrimitive(k)
-        vdata = geom.getVertexData()
-        vertex = GeomVertexReader(vdata, 'vertex')
-        assert isinstance(prim, (GeomTristrips, GeomTriangles))
-
-        # Decompose into triangles
-        prim = prim.decompose()
-        for p in range(prim.getNumPrimitives()):
-            s = prim.getPrimitiveStart(p)
-            e = prim.getPrimitiveEnd(p)
-
-            triPts = []
-            for i in range(s, e):
-                vi = prim.getVertex(i)
-                vertex.setRow(vi)
-                v = vertex.getData3f()
-                triPts.append([v.x, v.y, v.z])
-            triPts = np.array(triPts)
-
-            # calculate the semi-perimeter and area
-            a = np.linalg.norm(triPts[0] - triPts[1], 2)
-            b = np.linalg.norm(triPts[1] - triPts[2], 2)
-            c = np.linalg.norm(triPts[2] - triPts[0], 2)
-            s = (a + b + c) / 2
-            area = (s * (s - a) * (s - b) * (s - c)) ** 0.5
-            totalArea += area
-
-    return totalArea
-
-
-def getColorAttributesFromModel(model):
-    areas = []
-    rgbColors = []
-    textures = []
-    transparencies = []
-    for nodePath in model.findAllMatches('**/+GeomNode'):
-        geomNode = nodePath.node()
-
-        for n in range(geomNode.getNumGeoms()):
-            state = geomNode.getGeomState(n)
-
-            rgbColor = None
-            texture = None
-            isTransparent = False
-            if state.hasAttrib(TextureAttrib.getClassType()):
-                texAttr = state.getAttrib(TextureAttrib.getClassType())
-                tex = texAttr.getTexture()
-
-                # Load texture image from file and compute average color
-                texFilename = str(tex.getFullpath())
-                img = scipy.ndimage.imread(texFilename)
-
-                texture = os.path.splitext(os.path.basename(texFilename))[0]
-
-                # TODO: handle black-and-white and RGBA texture
-                assert img.dtype == np.uint8
-                assert img.ndim == 3 and img.shape[-1] == 3
-
-                rgbColor = (np.mean(img, axis=(0, 1)) / 255.0).tolist()
-
-            elif state.hasAttrib(ColorAttrib.getClassType()):
-                colorAttr = state.getAttrib(ColorAttrib.getClassType())
-                color = colorAttr.getColor()
-
-                if isinstance(color, LVecBase4f):
-                    rgbColor = [color[0], color[1], color[2]]
-                    alpha = color[3]
-
-                    if state.hasAttrib(TransparencyAttrib.getClassType()):
-                        transAttr = state.getAttrib(TransparencyAttrib.getClassType())
-                        if transAttr.getMode() != TransparencyAttrib.MNone and alpha < 1.0:
-                            isTransparent = True
-                    elif alpha < 1.0:
-                        isTransparent = True
-
-                elif isinstance(color, LVecBase3f):
-                    rgbColor = [color[0], color[1], color[2]]
-                else:
-                    raise Exception('Unsupported color class type: '
-                                    '%s' % (color.__class__.__name__))
-
-            rgbColors.append(rgbColor)
-            transparencies.append(isTransparent)
-
-            geom = geomNode.getGeom(n)
-            area = getSurfaceAreaFromGeom(geom)
-            areas.append(area)
-            textures.append(texture)
-
-    areas = np.array(areas)
-    areas /= np.sum(areas)
-
-    return areas, rgbColors, transparencies, textures
-
 
 class MaterialTable(object):
     @staticmethod
@@ -241,6 +140,68 @@ class MaterialColorTable(object):
 
         return colorDescriptions
 
+class DimensionTable(object):
+    
+    #NOTE: This table is assumed to be sorted.
+    #      The values are in units of standard deviation (e.g. 2.0 x sigma)
+    overallSizeTable = [ ['tiny', -2.0],
+                          ['small', -1.0],
+                          #['normal', 0.0],
+                          ['large', 1.0],
+                          ['huge', 2.0]]
+    
+    @staticmethod
+    def getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename):
+        
+        modelInfo = ModelInformation(modelInfoFilename)
+        modelCat = ModelCategoryMapping(modelCatFilename)
+        
+        refModelDimensions = None
+        otherSimilarDimensions = []
+        refModelId = str(obj.modelId)
+        refCategory = modelCat.getCoarseGrainedCategoryForModelId(refModelId)
+        for modelId in modelInfo.model_info.keys():
+            category = modelCat.getCoarseGrainedCategoryForModelId(modelId)
+            if refCategory == category:
+                info = modelInfo.getModelInfo(modelId)
+                
+                # FIXME: handle the general case where for the front vector, do not ignore
+                # NOTE: SUNCG is using the Y-up coordinate system
+                frontVec = info['front']
+                if np.count_nonzero(frontVec) > 1 or not np.array_equal(frontVec, [0,0,1]):
+                    continue
+
+                width, height, depth = info['aligned_dims'] / 100.0 # cm to m
+                otherSimilarDimensions.append([width, height, depth])
+                
+                if refModelId == modelId:
+                    refModelDimensions = np.array([width, height, depth])
+                
+        otherSimilarDimensions = np.array(otherSimilarDimensions)
+        logger.debug('Number of similar objects found in dataset: %d' % (otherSimilarDimensions.shape[0]))
+
+        # Volume statistics (assume a gaussian distribution)
+        # XXX: use a more general histogram method to define the categories, rather than simply comparing the deviation to the mean
+        refVolume = np.prod(refModelDimensions)
+        otherVolumes = np.prod(otherSimilarDimensions, axis=-1)
+        mean = np.mean(otherVolumes)
+        std = np.std(otherVolumes)
+        
+        # Compare the deviation to the mean
+        overallSizeTag = None
+        diff = refVolume - mean
+        for tag, threshold in DimensionTable.overallSizeTable:
+            if threshold >= 0.0:
+                if diff > threshold * std:
+                    overallSizeTag = tag
+            else:
+                if diff < threshold * std:
+                    overallSizeTag = tag
+                    
+        if overallSizeTag is None:
+            overallSizeTag = 'normal'
+        
+        return overallSizeTag
 
 class SemanticWorld(object):
     def __init__(self):

@@ -23,7 +23,7 @@ for obj in $(find ${OBJ_DIRECTORY} -name '*.obj'); do
 	INPUT_OBJ_DIR=$(dirname "${INPUT_OBJ_FILE}")
 	cd ${INPUT_OBJ_DIR}
 
-	python ${DIR}/obj2egg.py ${INPUT_OBJ_FILE}
+	python ${DIR}/obj2egg.py --coordinate-system=y-up-right ${INPUT_OBJ_FILE}
 	if ! [ -f $OUTPUT_EGG_FILE ]; then
 		echo "Could not find output file ${OUTPUT_EGG_FILE}. An error probably occured during conversion."
 		exit 1

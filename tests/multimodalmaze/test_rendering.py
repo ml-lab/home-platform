@@ -32,7 +32,6 @@ import unittest
 
 import matplotlib.pyplot as plt
 
-from panda3d.core import Vec3
 from multimodalmaze.core import House, Object, Agent
 from multimodalmaze.rendering import Panda3dRenderWorld
 
@@ -63,14 +62,16 @@ class TestHouse(unittest.TestCase):
         self.render.setCamera(mat)
         self.render.step()
         image = self.render.getRgbImage()
-        depth = self.render.getDepthImage()
+        depth = self.render.getDepthImage(mode='distance')
+        self.assertTrue(np.min(depth) >= self.render.zNear)
+        self.assertTrue(np.max(depth) <= self.render.zFar)
         
         fig = plt.figure(figsize=(16,8))
         plt.axis("off")
         ax = plt.subplot(121)
         ax.imshow(image)
         ax = plt.subplot(122)
-        ax.imshow(depth.squeeze(), cmap='binary')
+        ax.imshow(depth/np.max(depth), cmap='binary')
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
@@ -108,7 +109,7 @@ class TestRoom(unittest.TestCase):
         ax = plt.subplot(121)
         ax.imshow(image)
         ax = plt.subplot(122)
-        ax.imshow(depth.squeeze(), cmap='binary')
+        ax.imshow(depth, cmap='binary')
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
@@ -123,14 +124,14 @@ class TestObject(unittest.TestCase):
     
     def testRender(self):
         
-        modelId = '77'
-        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".obj")
+        modelId = '83'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
         assert os.path.exists(modelFilename)
         instanceId = str(modelId) + '-0'
         obj = Object(instanceId, modelId, modelFilename)
         
-        nodePath = self.render.addObjectToScene(obj)
-        nodePath.setPos(Vec3(0,0,0))
+        self.render.addObjectToScene(obj)
+        obj.setPosition((0,0,0))
         
         self.render.addDefaultLighting()
         
@@ -148,7 +149,7 @@ class TestObject(unittest.TestCase):
         ax = plt.subplot(121)
         ax.imshow(image)
         ax = plt.subplot(122)
-        ax.imshow(depth.squeeze(), cmap='binary')
+        ax.imshow(depth, cmap='binary')
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
@@ -167,8 +168,9 @@ class TestAgent(unittest.TestCase):
         assert os.path.exists(modelFilename)
         agent = Agent('agent-0', modelFilename)
         
-        nodePath = self.render.addAgentToScene(agent)
-        nodePath.setColor(1,0,0,1)
+        self.render.addAgentToScene(agent)
+        agent.renderInstance.nodePath.setColor(1,0,0,1)
+        agent.setPosition((0,0,0))
         
         self.render.addDefaultLighting()
         
@@ -186,7 +188,7 @@ class TestAgent(unittest.TestCase):
         ax = plt.subplot(121)
         ax.imshow(image)
         ax = plt.subplot(122)
-        ax.imshow(depth.squeeze(), cmap='binary')
+        ax.imshow(depth, cmap='binary')
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)

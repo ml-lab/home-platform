@@ -34,7 +34,7 @@ TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 
 
 from multimodalmaze.core import Object
 from multimodalmaze.semantic import MaterialColorTable, SuncgSemanticWorld,\
-    MaterialTable
+    MaterialTable, DimensionTable
     
 class TestMaterialColorTable(unittest.TestCase):
     
@@ -48,6 +48,15 @@ class TestMaterialColorTable(unittest.TestCase):
         colorDescriptions = MaterialColorTable.getBasicColorsFromObject(obj, mode='basic')
         self.assertTrue(len(colorDescriptions) == 1)
         self.assertTrue(colorDescriptions[0] == "silver")
+        
+        modelId = '83'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        colorDescriptions = MaterialColorTable.getBasicColorsFromObject(obj, mode='basic')
+        self.assertTrue(len(colorDescriptions) == 1)
+        self.assertTrue(colorDescriptions[0] == "white")
         
     def testBasicTransparent(self):
         
@@ -76,6 +85,16 @@ class TestMaterialColorTable(unittest.TestCase):
         self.assertTrue(colorDescriptions[0] == "navajo white")
         self.assertTrue(colorDescriptions[1] == "dark slate gray")
         
+        modelId = '210'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        colorDescriptions = MaterialColorTable.getBasicColorsFromObject(obj, mode='advanced')
+        self.assertTrue(len(colorDescriptions) == 2)
+        self.assertTrue(colorDescriptions[0] == "dark gray")
+        self.assertTrue(colorDescriptions[1] == "cadet blue")
+        
     def testXkcd(self):
         
         modelId = '317'
@@ -103,6 +122,22 @@ class TestMaterialTable(unittest.TestCase):
         materialDescriptions = MaterialTable.getMaterialNameFromObject(obj, thresholdRelArea=0.0)
         self.assertTrue(len(materialDescriptions) == 1)
         self.assertTrue(materialDescriptions[0] == "wood")
+       
+class TestDimensionTable(unittest.TestCase):
+       
+    def testGetDimensionsFromObject(self):
+        
+        modelId = '274'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        instanceId = str(modelId) + '-0'
+        obj = Object(instanceId, modelId, modelFilename)
+        
+        # XXX: should use the full metadata files if descriptors are not precomputed
+        modelInfoFilename = os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "models.csv")
+        modelCatFilename = os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "ModelCategoryMapping.csv")
+        dimensionDescription = DimensionTable().getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
+        self.assertTrue(dimensionDescription == 'normal')
        
 class TestSuncgSemanticWorld(unittest.TestCase):
      

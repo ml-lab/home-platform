@@ -131,3 +131,76 @@ class ModelCategoryMapping(object):
 
     def getCoarseGrainedClassList(self):
         return sorted(set(self.coarse_grained_class.values()))
+
+
+class ObjectVoxelData(object):
+    def __init__(self, voxels, translation, scale):
+        self.voxels = voxels
+        self.translation = translation
+        self.scale = scale
+
+    def getFilledVolume(self):
+        nbFilledVoxels = np.count_nonzero(self.voxels)
+        perVoxelVolume = self.scale / np.prod(self.voxels.shape)
+        return nbFilledVoxels * perVoxelVolume
+
+    @staticmethod
+    def fromFile(filename):
+
+        with open(filename, 'rb') as f:
+
+            # Read header line and version
+            line = f.readline().decode('ascii').strip()  # u'#binvox 1'
+            header, version = line.split(" ")
+            if header != '#binvox':
+                raise Exception('Unable to read header from file: %s' % (filename))
+            version = int(version)
+            assert version == 1
+
+            # Read dimensions and transforms
+            line = f.readline().decode('ascii').strip()  # u'dim 128 128 128'
+            items = line.split(" ")
+            assert items[0] == 'dim'
+            depth, height, width = np.fromstring(" ".join(items[1:]), sep=' ', dtype=np.int)
+
+            # XXX: what is this translation component?
+            line = f.readline().decode('ascii').strip()  # u'translate -0.176343 -0.356254 0.000702'
+            items = line.split(" ")
+            assert items[0] == 'translate'
+            translation = np.fromstring(" ".join(items[1:]), sep=' ', dtype=np.float)
+
+            line = f.readline().decode('ascii').strip()  # u'scale 0.863783'
+            items = line.split(" ")
+            assert items[0] == 'scale'
+            scale = float(items[1])
+
+            # Read voxel data
+            line = f.readline().decode('ascii').strip()  # u'data'
+            assert line == 'data'
+
+            size = width * height * depth
+            voxels = np.zeros((size,), dtype=np.int8)
+
+            nrVoxels = 0
+            index = 0
+            endIndex = 0
+            while endIndex < size:
+                value = np.fromstring(f.read(1), dtype=np.uint8)[0]
+                count = np.fromstring(f.read(1), dtype=np.uint8)[0]
+                endIndex = index + count
+                assert endIndex <= size
+
+                voxels[index:endIndex] = value
+                if value != 0:
+                    nrVoxels += count
+                index = endIndex
+
+            # NOTE: we should by now have reach the end of the file
+            assert f.readline() == ''
+
+            # FIXME: not sure about the particular dimension ordering here!
+            voxels = voxels.reshape((width, height, depth))
+
+            logger.debug('Number of non-empty voxels read from file: %d' % (nrVoxels))
+
+        return ObjectVoxelData(voxels, translation, scale)

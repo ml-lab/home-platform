@@ -144,7 +144,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, roomSize, 0.0, 0.0],
                               [0.0, 0.0, roomSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
-        obj = Object(instanceId, modelId, modelFilename, transform=transform)
+        obj = Object(instanceId, modelId, modelFilename)
+        obj.setTransform(transform)
         roomNode = engine.addObjectToScene(obj, mode='exact')
         roomNode.setRenderModeWireframe()
         
@@ -156,7 +157,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, agentSize, 0.0, 0.0],
                               [0.0, 0.0, agentSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
-        agent = Agent(instanceId, modelFilename, transform)
+        agent = Agent(instanceId, modelFilename)
+        agent.setTransform(transform)
         agentNode = engine.addAgentToScene(agent, interauralDistance=0.25)
 
         # Define a sound source
@@ -168,7 +170,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, sourceSize, 0.0, 0.0],
                               [0.0, 0.0, sourceSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
-        source = Object(instanceId, modelId, modelFilename, transform=transform)
+        source = Object(instanceId, modelId, modelFilename)
+        source.setTransform(transform)
         sourceNode = engine.addStaticSourceToScene(source)
         sourceNode.setPos(0.0, 0.0, 0.0)
         
@@ -256,7 +259,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
 
     def testRenderRoom(self):
 
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=True, frequencyDependent=True, showCeiling=False)
         
         # Define the scene geometry
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
@@ -278,7 +281,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, agentSize, 0.0, 0.0],
                               [0.0, 0.0, agentSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
-        agent = Agent(instanceId, modelFilename, transform)
+        agent = Agent(instanceId, modelFilename)
+        agent.setTransform(transform)
         agentNode = engine.addAgentToScene(agent, interauralDistance=0.5)
         agentNode.setHpr(90,0,0)
         agentNode.setPos(LVector3f(-2.0, 1.0, -0.75) + refCenter)
@@ -292,7 +296,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, sourceSize, 0.0, 0.0],
                               [0.0, 0.0, sourceSize, 0.0],
                               [0.0, 0.0, 0.0, 1.0]])
-        source = Object(instanceId, modelId, modelFilename, transform=transform)
+        source = Object(instanceId, modelId, modelFilename)
+        source.setTransform(transform)
         sourceNode = engine.addStaticSourceToScene(source)
         sourceNode.setPos(LVector3f(1.5, -1.0, -0.25) + refCenter)
 
@@ -351,15 +356,8 @@ class TestEvertAcousticWorld(unittest.TestCase):
         
         sga = SceneGraphAnalyzer()
         sga.addNode(engine.render.node())
-        print (len(engine.acousticTriangles))
-        print (engine.world.numElements())
-        print (sga.get_num_triangles_in_strips())
-        print (engine.world.numConvexElements())
-        print (sga.get_num_triangles_in_strips())
-        #self.assertTrue(len(engine.acousticTriangles) == engine.world.numElements() == sga.get_num_triangles_in_strips())
-        #self.assertTrue(len(engine.acousticTriangles) == engine.world.numConvexElements() == sga.get_num_triangles_in_strips())
-        self.assertTrue(len(engine.acousticTriangles) == sga.get_num_triangles_in_strips() == sga.get_num_triangles_in_strips())
-        self.assertTrue(engine.world.numElements() == engine.world.numConvexElements())
+        self.assertTrue(engine.world.numElements() <= sga.get_num_triangles_in_strips())
+        self.assertTrue(engine.world.numConvexElements() <= sga.get_num_triangles_in_strips())
         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
