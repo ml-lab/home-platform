@@ -84,6 +84,9 @@ class Observation(object):
         self.image = image
         self.collision = collision
 
+    def as_dict(self):
+        return self.__dict__
+
 
 class BasicEnvironment(object):
     def __init__(self, suncgDatasetRoot=None):
