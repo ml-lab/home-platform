@@ -32,6 +32,7 @@ from multimodalmaze.core import Agent
 
 from rendering import Panda3dRenderWorld
 from physics import Panda3dBulletPhysicWorld
+from multimodalmaze.acoustics import EvertAcousticWorld
 
 logger = logging.getLogger(__name__)
 
@@ -78,16 +79,21 @@ def extractAllRegions(occupacyGrid):
         
 class BasicEnvironment(object):
     
-    def __init__(self):
-        
-        self.renderWorld = Panda3dRenderWorld(shadowing=False, showCeiling=False)
-        self.physicWorld = Panda3dBulletPhysicWorld()
-        self.worlds = [self.renderWorld, self.physicWorld]
+    def __init__(self, suncgDatasetRoot=None):
         
         # Create default agent
         self.agent = Agent('agent')
-        for world in self.worlds:
-            world.addAgentToScene(self.agent)
+        
+        self.renderWorld = Panda3dRenderWorld(size=(256, 256), shadowing=False, showCeiling=False)
+        self.renderWorld.addDefaultLighting()
+        self.renderWorld.addAgentToScene(self.agent)
+        
+        self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
+        self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
+        
+        #self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        
+        self.worlds = [self.physicWorld, self.renderWorld]
         
     def loadHouse(self, house):
         for world in self.worlds:
@@ -161,5 +167,6 @@ class BasicEnvironment(object):
         return occupancyMap, occupancyMapCoord, np.array(positions)
         
     def step(self):
+        # FIXME: we should always update the physics first
         for world in self.worlds:
             world.step()

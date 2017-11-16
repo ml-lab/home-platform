@@ -1,4 +1,3 @@
-
 # Copyright (c) 2017, IGLU consortium
 # All rights reserved.
 # 
@@ -103,7 +102,7 @@ class Panda3dRenderWorld(RenderWorld):
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=True, showCeiling=True, mode='offscreen', zNear=1.0, zFar=1000.0):
+    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0):
         
         self.size = size
         self.mode = mode

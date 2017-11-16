@@ -99,25 +99,15 @@ class Object(object):
         assert transform.shape[0] == transform.shape[1] == 4
         
         self.transform = transform
-        if self.physicInstance is not None:
-            self.physicInstance.setTransform(self.transform)
-        if self.renderInstance is not None:
-            self.renderInstance.setTransform(self.transform)
-        if self.acousticInstance is not None:
-            self.acousticInstance.setTransform(self.transform)
+        self._forceTransform()
 
     def setPosition(self, position):
         position = np.atleast_1d(position)
         assert len(position) == 3
+        
         self.transform[-1,:3] = position
-
-        if self.physicInstance is not None:
-            self.physicInstance.setTransform(self.transform)
-        if self.renderInstance is not None:
-            self.renderInstance.setTransform(self.transform)
-        if self.acousticInstance is not None:
-            self.acousticInstance.setTransform(self.transform)
-            
+        self._forceTransform()
+        
     def setLinearVelocity(self, velocity):
         if self.physicInstance is not None:
             self.physicInstance.setLinearVelocity(velocity)
@@ -133,16 +123,34 @@ class Object(object):
         return isCollisionDetected
             
     def getPosition(self):
-        return self.transform[-1,:3]
+        self._syncTransform()
+        return np.copy(self.transform[-1,:3])
     
     def getOrientation(self):
+        self._syncTransform()
         return matrixToEuler(self.transform[:3,:3])
     
+    def getTransform(self):
+        self._syncTransform()
+        return np.copy(self.transform)
+    
     def setOrientation(self, theta):
+        theta = np.atleast_1d(theta)
+        assert len(theta) == 3
+        
         self.transform[:3,:3] = eulerToMatrix(theta)
+        self._forceTransform()
     
     def clearAttributes(self):
         self.attributes.clear()
+
+    def _forceTransform(self):
+        if self.physicInstance is not None:
+            self.physicInstance.setTransform(self.transform)
+        if self.renderInstance is not None:
+            self.renderInstance.setTransform(self.transform)
+        if self.acousticInstance is not None:
+            self.acousticInstance.setTransform(self.transform)
 
     def _syncTransform(self):
         # Get updated transform from the physic instance

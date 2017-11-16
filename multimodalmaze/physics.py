@@ -98,6 +98,15 @@ class Panda3dBulletPhysicObject(PhysicObject):
         self.nodePath.setTransform(TransformState.makeMat(mat).compose(self.recenterTransform))
 
     def setLinearVelocity(self, velocity):
+        
+        # Apply the local transform to the velocity
+        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
+        mat = self.nodePath.node().getTransform().getMat()
+        rotMat = np.array([[mat[0][0], mat[0][1], mat[0][2]],
+                         [mat[1][0], mat[1][1], mat[1][2]],
+                         [mat[2][0], mat[2][1], mat[2][2]]])
+        velocity = np.dot(velocity, rotMat)
+        
         velocity = Vec3(velocity[0], velocity[1], velocity[2])
         self.nodePath.node().setLinearVelocity(velocity)
     
@@ -248,6 +257,7 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         elif mode == 'sphere':
             shape = BulletCapsuleShape(radius, 2*radius)
             
+        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
         node = BulletRigidBodyNode('agent-' + str(agent.instanceId))
         node.setMass(mass)
         node.setStatic(False)
