@@ -31,7 +31,7 @@ import logging
 import numpy as np
 import scipy.ndimage
 
-from panda3d.core import Vec3, VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
+from panda3d.core import VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
                          GeomVertexReader, GeomTristrips, GeomTriangles, LineStream, SceneGraphAnalyzer, \
                          LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState,\
     GeomEnums

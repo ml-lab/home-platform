@@ -1,4 +1,4 @@
-# Copyright (c) 2017, simon
+# Copyright (c) 2017, IGLU consortium
 # All rights reserved.
 # 
 # Redistribution and use in source and binary forms, with or without modification,

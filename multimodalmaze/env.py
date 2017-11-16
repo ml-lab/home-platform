@@ -110,6 +110,10 @@ class BasicEnvironment(object):
         self.labeledNavMap = None
         self.occupancyMapCoord = None
 
+    def destroy(self):
+        if self.renderWorld is not None:
+            self.renderWorld.destroy()
+
     def loadHouse(self, house):
         # FIXME: find out why the acoustic engine needs to be last, otherwise the positions are not synchronized
         self.worlds["physics"].addHouseToScene(house)

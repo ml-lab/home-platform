@@ -26,6 +26,7 @@
 
 import os
 import time
+import multiprocessing
 import logging
 import numpy as np
 import unittest
@@ -67,6 +68,8 @@ class TestBasicEnvironment(unittest.TestCase):
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
+        
+        env.destroy()
     
     def testGenerateSpawnPositions(self):
         
@@ -89,6 +92,8 @@ class TestBasicEnvironment(unittest.TestCase):
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
+        
+        env.destroy()
         
     def testAcoustics(self):
         
@@ -127,6 +132,47 @@ class TestBasicEnvironment(unittest.TestCase):
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
+        
+        env.destroy()
+        
+    def testMultiprocessing(self):
+        # Spawn new process with independent simulations using the multiprocessing module
+         
+        nbProcesses = 2
+        nbSteps = 100
+        def worker():
+  
+            house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
+                                   TEST_SUNCG_DATA_DIR)
+          
+            env = BasicEnvironment()
+            env.loadHouse(house)
+              
+            env.agent.setPosition((45, -42, 1))
+            env.agent.setOrientation((0.0, 0.0, -np.pi/4))
+              
+            # Define a sound source (toilet)
+            instanceId = 'source'
+            modelId = '0'
+            source = Object(instanceId, modelId)
+            env.acousticWorld.addStaticSourceToScene(source)
+            source.setPosition((39.0, -40.51, 1.5))
+              
+            # Simulation loop
+            for _ in range(nbSteps):
+                env.step()
+                _ = env.getObservation()
+                 
+            env.destroy()
+  
+        processes = []
+        for _ in range(nbProcesses):
+            p = multiprocessing.Process(target=worker)
+            processes.append(p)
+            p.start()
+          
+        for p in processes:
+            p.join()
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
