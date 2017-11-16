@@ -29,6 +29,7 @@ import logging
 import numpy as np
 
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,23 @@ def ignoreVariant(modelId):
     if modelId.endswith(suffix):
         modelId = modelId[:len(modelId) - len(suffix)]
     return modelId
+
+
+def data_dir():
+    """ Get SUNCG data path (must be symlinked to ~/.suncg)
+
+    :return: Path to suncg dataset
+    """
+
+    path = os.path.join(os.path.abspath(os.path.expanduser('~')), ".suncg")
+    rooms_exist = os.path.isdir(os.path.join(path, "room"))
+    houses_exist = os.path.isdir(os.path.join(path, "house"))
+    if not os.path.isdir(path) or not rooms_exist or not houses_exist:
+        raise Exception("Couldn't find the SUNCG dataset in '~/.suncg'. "
+                        "Please symlink the dataset there, so that the folders "
+                        "'~/.suncg/room', '~/.suncg/house', etc. exist.")
+
+    return path
 
 
 class ModelInformation(object):
