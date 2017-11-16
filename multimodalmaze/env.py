@@ -91,26 +91,30 @@ class BasicEnvironment(object):
         # Create default agent
         self.agent = Agent('agent')
 
+        self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
+        self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
+
         self.renderWorld = Panda3dRenderWorld(size=(256, 256), shadowing=False, showCeiling=False)
         self.renderWorld.addDefaultLighting()
         self.renderWorld.addAgentToScene(self.agent)
 
-        self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
-        self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
-
-        # self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
-
+        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        self.acousticWorld.addAgentToScene(self.agent)
+        
         self.worlds = {
             "physics": self.physicWorld,
-            "render": self.renderWorld
+            "render": self.renderWorld,
+            "acoustics": self.acousticWorld,
         }
 
         self.labeledNavMap = None
         self.occupancyMapCoord = None
 
     def loadHouse(self, house):
-        for _, world in self.worlds.iteritems():
-            world.addHouseToScene(house)
+        # FIXME: find out why the acoustic engine needs to be last, otherwise the positions are not synchronized
+        self.worlds["physics"].addHouseToScene(house)
+        self.worlds["render"].addHouseToScene(house)
+        self.worlds["acoustics"].addHouseToScene(house)
 
     def generateOccupancyMap(self, minRegionArea=10.0, z=1.0, precision=0.1):
 
@@ -189,5 +193,7 @@ class BasicEnvironment(object):
         return Observation(position, orientation, image, collision)
 
     def step(self):
+        # NOTE: we should always update the physics first
         self.worlds["physics"].step()
         self.worlds["render"].step()
+        self.worlds["acoustics"].step()

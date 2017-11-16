@@ -135,6 +135,8 @@ class Object(object):
         return np.copy(self.transform)
     
     def setOrientation(self, theta):
+        # XXX: euler angles are different that HPR (YPR) angles,
+        #      this should be more clear in the description.
         theta = np.atleast_1d(theta)
         assert len(theta) == 3
         

@@ -31,7 +31,7 @@ import logging
 import numpy as np
 import unittest
 import matplotlib.pyplot as plt
-from panda3d.core import LVector3f, SceneGraphAnalyzer
+from panda3d.core import SceneGraphAnalyzer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
@@ -379,8 +379,3 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
     np.seterr(all='raise')
     unittest.main()
-    
-    suite = unittest.TestSuite()
-    suite.addTest(TestEvertAcousticWorld("testRenderRoom"))
-    runner = unittest.TextTestRunner()
-    runner.run(suite)
