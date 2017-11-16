@@ -1,4 +1,3 @@
-
 # Copyright (c) 2017, IGLU consortium
 # All rights reserved.
 # 
@@ -103,7 +102,7 @@ class Panda3dRenderWorld(RenderWorld):
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=True, showCeiling=True, mode='offscreen', zNear=1.0, zFar=1000.0):
+    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0):
         
         self.size = size
         self.mode = mode
@@ -307,36 +306,21 @@ class Panda3dRenderWorld(RenderWorld):
         return nodePath
 
     def addDefaultLighting(self):
-        
-        for x,y in [(0,0),(30,0),(0,30),(-30,0),(0,-30)]:
-            plight = PointLight('plight')
-            plight.setColor(VBase4(0.7, 0.7, 0.7, 1))
-            
-            node = self.scene.find("**/house*")
-            if len(node.getNodes()) == 0:
-                node = self.scene.find("**/room*")
-                if len(node.getNodes()) == 0:
-                    node = self.scene.find("**/object*")
-            
-            if len(node.getNodes()) == 0:
-                sceneCenter = Vec3(0,0,0)
-            else:
-                sceneCenter = node.getBounds().getCenter()
-            
-            plnp = self.scene.attachNewNode(plight)
-            plnp.setPos(sceneCenter+Vec3(x,y,15))
-            self.scene.setLight(plnp)
-
-            if self.shadowing:
-                # Use a 512x512 resolution shadow map
-                plight.setShadowCaster(True, 512, 512)
-                
         alight = AmbientLight('alight')
         alight.setColor(VBase4(0.2, 0.2, 0.2, 1))
         alnp = self.scene.attachNewNode(alight)
         self.scene.setLight(alnp)
         
+        #NOTE: Point light following the camera
+        plight = PointLight('plight')
+        plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
+        plnp = self.camera.attachNewNode(plight)
+        self.scene.setLight(plnp)
+        
         if self.shadowing:
+            # Use a 512x512 resolution shadow map
+            plight.setShadowCaster(True, 512, 512)
+
             # Enable the shader generator for the receiving nodes
             self.scene.setShaderAuto()
             self.scene.setAntialias(AntialiasAttrib.MAuto)
