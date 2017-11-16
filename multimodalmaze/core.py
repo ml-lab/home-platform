@@ -253,6 +253,14 @@ class House(object):
         return len(set(levelIds))
 
     @staticmethod
+    def getJsonPath(base_path, house_id):
+        return os.path.join(
+            base_path,
+            "house",
+            house_id,
+            "house.json")
+
+    @staticmethod
     def loadFromJson(filename, datasetRoot):
         
         with open(filename) as f:

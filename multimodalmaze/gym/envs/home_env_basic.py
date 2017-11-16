@@ -1,7 +1,10 @@
 import gym
 from gym import spaces
 import numpy as np
+import os
 
+from multimodalmaze.core import House
+from multimodalmaze.env import BasicEnvironment
 from multimodalmaze.suncg import data_dir
 
 
@@ -37,7 +40,20 @@ class HomeEnv(gym.Env):
         print ("DEBUG: SUNCG DATA DIRECTORY:", self.data_path)
 
         self.action_space = spaces.MultiDiscrete([[0, 4], [0, 4]])
-        self.observation_space = spaces.Discrete(1)
+        self.observation_space = spaces.Dict({
+            # TODO what are the actual bounds of all possible houses?
+            # position is x, y, z
+            "position": spaces.Box(low=-100, high=100, shape=(3)),
+
+            # TODO get actual box for HPR
+            # orientation is HPR / heading, pitch, roll
+            "orientation": spaces.Box(low=-100, high=100, shape=(3)),
+
+            "image": spaces.Box(low=0, high=255, shape=(500, 500, 3)),
+
+            # collision [0] - no collision, [1] - you bumped into sthg
+            "collision": spaces.Discrete(2)
+        })
 
         self.observation = 1  # TODO: temporary
 
@@ -53,18 +69,29 @@ class HomeEnv(gym.Env):
         # the houses in specific order
         self.next_house = 0
 
-        self._seed()
         self._reset()
 
-    def _seed(self, seed=None):
-        # self.np_random, seed = seeding.np_random(seed)
-        self.next_house = 0
-        return [seed]
+    def _seed(self, seed=0):
+        """ Force loading a specific house
+
+        :param seed: integer ID for house (not house ID)
+        :return:
+        """
+        assert seed < len(self.list_of_houses)
+
+        self.next_house = seed
+
+        return [self.next_house]
 
     def _step(self, action):
         assert self.action_space.contains(action)
 
-        pass  # TODO
+        # TODO execute action
+
+        self.env.step()
+
+        self.observation = self.env.getObservation().__dict__
+
         reward = 0
         done = False
         misc = None
@@ -72,8 +99,22 @@ class HomeEnv(gym.Env):
         return self.observation, reward, done, misc
 
     def _reset(self):
-        # TODO load house, based on self.list_of_houses[self.next_house]
+        # TODO maybe in the future we can unload the old house/rooms/objects
+        # so we don't have to recreate the Panda3dBulletPhysicWorld
+        # and Panda3dRenderWorld on every reset
 
+        # load a new empty physics and render world
+        self.env = BasicEnvironment()
+        # self.agent = self.env.agent
+
+        # load the house into the world
+        houseFilename = House.getJsonPath(
+            self.data_path,
+            self.list_of_houses[self.next_house])
+        house = House.loadFromJson(houseFilename, self.data_path)
+        self.env.loadHouse(house)
+
+        #TODO move agent to random pos and orientation
 
         self.next_house += 1
 

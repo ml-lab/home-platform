@@ -77,6 +77,14 @@ def extractAllRegions(occupacyGrid):
     return occupacyGrid
 
 
+class Observation(object):
+    def __init__(self, position, orientation, image, collision):
+        self.position = position
+        self.orientation = orientation
+        self.image = image
+        self.collision = collision
+
+
 class BasicEnvironment(object):
     def __init__(self, suncgDatasetRoot=None):
 
@@ -171,6 +179,14 @@ class BasicEnvironment(object):
         occupancyMap[self.labeledNavMap == -1] = 1.0
 
         return occupancyMap, self.occupancyMapCoord, np.array(positions)
+
+    def getObservation(self):
+        position = self.agent.getPosition()
+        orientation = self.agent.getOrientation()
+        image = self.renderWorld.getRgbImage()
+        collision = self.agent.isCollision()
+
+        return Observation(position, orientation, image, collision)
 
     def step(self):
         self.worlds["physics"].step()
