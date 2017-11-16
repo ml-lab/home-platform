@@ -26,13 +26,14 @@
 
 import os
 import time
+import multiprocessing
 import logging
 import numpy as np
 import unittest
 
 import matplotlib.pyplot as plt
 
-from multimodalmaze.core import House
+from multimodalmaze.core import House, Object
 from multimodalmaze.env import BasicEnvironment
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
@@ -67,6 +68,8 @@ class TestBasicEnvironment(unittest.TestCase):
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
+        
+        env.destroy()
     
     def testGenerateSpawnPositions(self):
         
@@ -89,6 +92,87 @@ class TestBasicEnvironment(unittest.TestCase):
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
+        
+        env.destroy()
+        
+    def testAcoustics(self):
+        
+        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
+                                   TEST_SUNCG_DATA_DIR)
+        
+        env = BasicEnvironment()
+        env.loadHouse(house)
+        
+        env.agent.setPosition((45, -42, 1))
+        env.agent.setOrientation((0.0, 0.0, -np.pi/4))
+        
+        # Define a sound source (toilet)
+        instanceId = 'source'
+        modelId = '0'
+        source = Object(instanceId, modelId)
+        env.acousticWorld.addStaticSourceToScene(source)
+        source.setPosition((39.0, -40.51, 1.5))
+        
+        # Configure the camera
+        #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
+        x,y,z = 0.5 * (env.agent.getPosition() + source.getPosition())
+        mat = np.array([[1.0, 0.0, 0.0, 0.0],
+                        [0.0, 0.0, -1.0, 0.0],
+                        [0.0, 1.0, 0.0, 0.0],
+                        [x, y, z + 25, 1]])
+        env.acousticWorld.setCamera(mat)
+        
+        env.step()
+        image = env.acousticWorld.getRgbImage()
+        
+        fig = plt.figure()
+        plt.axis("off")
+        ax = plt.subplot(111)
+        ax.imshow(image)
+        plt.show(block=False)
+        time.sleep(1.0)
+        plt.close(fig)
+        
+        env.destroy()
+        
+    def testMultiprocessing(self):
+        # Spawn new process with independent simulations using the multiprocessing module
+         
+        nbProcesses = 2
+        nbSteps = 100
+        def worker():
+  
+            house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
+                                   TEST_SUNCG_DATA_DIR)
+          
+            env = BasicEnvironment()
+            env.loadHouse(house)
+              
+            env.agent.setPosition((45, -42, 1))
+            env.agent.setOrientation((0.0, 0.0, -np.pi/4))
+              
+            # Define a sound source (toilet)
+            instanceId = 'source'
+            modelId = '0'
+            source = Object(instanceId, modelId)
+            env.acousticWorld.addStaticSourceToScene(source)
+            source.setPosition((39.0, -40.51, 1.5))
+              
+            # Simulation loop
+            for _ in range(nbSteps):
+                env.step()
+                _ = env.getObservation()
+                 
+            env.destroy()
+  
+        processes = []
+        for _ in range(nbProcesses):
+            p = multiprocessing.Process(target=worker)
+            processes.append(p)
+            p.start()
+          
+        for p in processes:
+            p.join()
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

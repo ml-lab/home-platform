@@ -32,12 +32,13 @@ import matplotlib.pyplot as plt
 
 from scipy import signal
 from string import digits
-from evert import Room, Source, Listener, Vector3, Matrix3, Polygon, PathSolution, Viewer
+from evert import Room as EvertRoom
+from evert import Source, Listener, Vector3, Matrix3, Polygon, PathSolution, Viewer
 
 from multimodalmaze.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
 
-from panda3d.core import AmbientLight, LVector3f, LVecBase3, VBase4, Mat4, CS_zup_right, CS_yup_right, ClockObject, \
-                         Material, PointLight, LineStream, SceneGraphAnalyzer
+from panda3d.core import AmbientLight, LVector3f, LVecBase3, VBase4, Mat4, ClockObject, \
+                         Material, PointLight, LineStream, SceneGraphAnalyzer, TransformState
 
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, AntialiasAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
@@ -45,6 +46,14 @@ from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOp
 logger = logging.getLogger(__name__)
 
 MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "models")
+
+class AcousticObject(object):
+   
+    def getTransform(self):
+        return NotImplementedError()
+
+    def setTransform(self):
+        return NotImplementedError()
 
 class AcousticWorld(object):
 
@@ -628,6 +637,33 @@ def validatePath(path, triangles, eps):
     
     return isValid
 
+class EvertAcousticObject(AcousticObject):
+    
+    def __init__(self, world, nodePath, recenterTransform=None):
+        self.world = world
+        self.nodePath = nodePath
+        
+        if recenterTransform is None:
+            recenterTransform = TransformState.makeIdentity()
+        self.recenterTransform = recenterTransform
+    
+    def getTransform(self):
+        transform = self.nodePath.node().getTransform()
+        mat = transform.compose(TransformState.makePos(-self.recenterTransform.getPos())).getMat()
+        return np.array([[mat[0][0], mat[0][1], mat[0][2], mat[0][3]],
+                         [mat[1][0], mat[1][1], mat[1][2], mat[1][3]],
+                         [mat[2][0], mat[2][1], mat[2][2], mat[2][3]],
+                         [mat[3][0], mat[3][1], mat[3][2], mat[3][3]]])
+
+    def getRecenterPosition(self):
+        position = self.recenterTransform.getPos()
+        return np.array([position.x, position.y, position.z])
+
+    def setTransform(self, transform):
+        mat = Mat4(*transform.ravel())
+        self.nodePath.setTransform(TransformState.makeMat(mat).compose(self.recenterTransform))
+
+
 class EvertAcousticWorld(AcousticWorld):
 
     # NOTE: the model ids of objects that correspond to opened doors. They will be ignored in the acoustic scene.
@@ -660,7 +696,7 @@ class EvertAcousticWorld(AcousticWorld):
         self.maximumOrder = maximumOrder
         self.materialAbsorption = materialAbsorption
         self.frequencyDependent = frequencyDependent
-        self.world = Room()
+        self.world = EvertRoom()
         self.solutions = []
         self.render = NodePath('acoustic-render')
         self.globalClock = ClockObject.getGlobalClock()
@@ -682,7 +718,10 @@ class EvertAcousticWorld(AcousticWorld):
         self.sources = []
         self.sourceNodesByInstanceId = dict()
         
+        self.acousticObjects = []
         self.nbTotalRejectedAcousticPolygons = 0
+        
+        self.geometryInitialized = False
     
     def _initRender(self, size, showCeiling):
         # Rendering attributes
@@ -706,6 +745,7 @@ class EvertAcousticWorld(AcousticWorld):
         self.camera.node().setPreserveTransform(ModelNode.PTLocal)
         
         self.scene = self.render.attachNewNode('scene')
+        self.obstacles = self.scene.attachNewNode('obstacles')
         
         self._initRgbCapture()
         self._addDefaultLighting()
@@ -1090,30 +1130,13 @@ class EvertAcousticWorld(AcousticWorld):
                 
         return impulse[:realImpulseLength]
     
-    def addStaticSourceToScene(self, obj, radius=0.5, color=(1.0,0.0,0.0,1.0)):
+    def addStaticSourceToScene(self, obj, radius=0.25, color=(1.0,0.0,0.0,1.0)):
 
         # Load model for the sound source
         sourceNode = self.scene.attachNewNode('acoustic-source-' + str(obj.instanceId))
         sourceNode.reparentTo(self.scene)
-        if obj.modelFilename is not None:
-            model = self._loadModel(obj.modelFilename)
-            model.reparentTo(sourceNode)
-            
-            if obj.transform is not None:
-                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-                transformMat = Mat4(*obj.transform.ravel())
-                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
-        else:
-            transformMat = Mat4(*obj.transform.ravel())
-            refCenter = transformMat.getCol3(3)
-            model = self._loadSphereModel(refCenter, radius, color)
-            model.reparentTo(sourceNode)
-        
-        # Bounding box approximation
-        minRefBounds, maxRefBounds = model.getTightBounds()
-        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
+        model = self._loadSphereModel(LVector3f(0,0,0), radius, color)
+        model.reparentTo(sourceNode)
         
         # Create source in EVERT
         src = Source()
@@ -1122,6 +1145,10 @@ class EvertAcousticWorld(AcousticWorld):
         
         self.sources.append(obj)
         self.sourceNodesByInstanceId[obj.instanceId] = sourceNode
+        
+        instance = EvertAcousticObject(self.world, sourceNode)
+        obj.setAcousticObject(instance)
+        self.acousticObjects.append(instance)
         
         return sourceNode
     
@@ -1133,39 +1160,19 @@ class EvertAcousticWorld(AcousticWorld):
         
         # Load model for the agent
         agentNode = self.scene.attachNewNode('agent-' + str(agent.instanceId))
-        if agent.modelFilename is not None:
-            model = self._loadModel(agent.modelFilename)
-            model.reparentTo(agentNode)
-            
-            if agent.transform is not None:
-                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-                transformMat = Mat4(*agent.transform.ravel())
-                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
-            
         agentNode.reparentTo(self.scene)
         
         # Load model for the left microphone
         leftMicNode = agentNode.attachNewNode('microphone-left')
-        transform = np.array([[1.0, 0.0, 0.0, 0.0],
-                              [0.0, 1.0, 0.0, 0.0],
-                              [0.0, 0.0, 1.0, 0.0],
-                              [-interauralDistance/2, 0.0, 0.0, 1.0]])
-        transformMat = Mat4(*transform.ravel())
-        leftMicNode.setMat(transformMat)
-        #leftMicNode.setTransform(leftTrans)
+        transform = TransformState.makePos(LVector3f(-interauralDistance/2, 0.0, 0.0))
+        leftMicNode.setTransform(transform)
         model = self._loadSphereModel(refCenter=LVecBase3(0.0, 0.0, 0.0), radius=0.10, color=(1.0,0.0,0.0,1.0))
         model.reparentTo(leftMicNode)
         
         # Load model for the right microphone
         rightMicNode = agentNode.attachNewNode('microphone-right')
-        transform = np.array([[1.0, 0.0, 0.0, 0.0],
-                              [0.0, 1.0, 0.0, 0.0],
-                              [0.0, 0.0, 1.0, 0.0],
-                              [interauralDistance/2, 0.0, 0.0, 1.0]])
-        transformMat = Mat4(*transform.ravel())
-        rightMicNode.setMat(transformMat)
+        transform = TransformState.makePos(LVector3f(interauralDistance/2, 0.0, 0.0))
+        rightMicNode.setTransform(transform)
         model = self._loadSphereModel(refCenter=LVecBase3(0.0, 0.0, 0.0), radius=0.10, color=(1.0,0.0,0.0,1.0))
         model.reparentTo(rightMicNode)
         
@@ -1181,11 +1188,15 @@ class EvertAcousticWorld(AcousticWorld):
         self.agents.append(agent)
         self.listenerNodesByInstanceId[agent.instanceId] = [leftMicNode, rightMicNode]
                 
+        instance = EvertAcousticObject(self.world, agentNode)
+        agent.setAcousticObject(instance)
+        self.acousticObjects.append(instance)
+                
         return agentNode
                 
-    def addObjectToScene(self, obj, mode='bbox'):
+    def addObjectToScene(self, obj, mode='box'):
 
-        node = self.scene.attachNewNode('object-' + str(obj.instanceId))
+        nodePath = self.obstacles.attachNewNode('object-' + str(obj.instanceId))
         if not obj.modelId in self.openedDoorModelIds:
 
             # Load model from file
@@ -1194,18 +1205,12 @@ class EvertAcousticWorld(AcousticWorld):
             coefficients = TextureAbsorptionTable.getMeanAbsorptionCoefficientsFromModel(model, units='normalized')
             materialId = len(self.coefficientsForMaterialId)
             self.coefficientsForMaterialId.append(coefficients)
-            
-            if obj.transform is not None:
-                # 4x4 column-major transformation matrix from object coordinates to scene coordinates
-                transformMat = Mat4(*obj.transform.ravel())
-                yupTransformMat = Mat4.convertMat(CS_zup_right, CS_yup_right)
-                zupTransformMat = Mat4.convertMat(CS_yup_right, CS_zup_right)
-                model.setMat(model.getMat() * yupTransformMat * transformMat * zupTransformMat)
     
-            if mode == 'exact':
+            transform = TransformState.makeIdentity()
+            if mode == 'mesh':
                 # Nothing to do
                 pass
-            elif mode == 'bbox':
+            elif mode == 'box':
                 # Bounding box approximation
                 minRefBounds, maxRefBounds = model.getTightBounds()
                 refDims = maxRefBounds - minRefBounds
@@ -1224,32 +1229,13 @@ class EvertAcousticWorld(AcousticWorld):
                 deltaCenter = center - pos
                 
                 position = refPos + refDeltaCenter - deltaCenter
-                model.setPos(position)
-                
                 scale = LVector3f(refDims.x/dims.x, refDims.y/dims.y, refDims.z/dims.z)
-                model.setScale(scale)
+                transform = TransformState.makePos(position).compose(TransformState.makeScale(scale))
                 
-                # Validate approximation
-                eps = 1e-4
-                minBounds, maxBounds = model.getTightBounds()
-                center = minBounds + (maxBounds - minBounds) / 2.0
-                dims = maxBounds - minBounds
-                assert np.allclose([dims.x, dims.y, dims.z], 
-                                   [refDims.x, refDims.y, refDims.z], 
-                                   atol=eps)
-                assert np.allclose([center.x, center.y, center.z], 
-                                   [refCenter.x, refCenter.y, refCenter.z], 
-                                   atol=eps)
-                assert np.allclose([minBounds.x, minBounds.y, minBounds.z], 
-                                   [minRefBounds.x, minRefBounds.y, minRefBounds.z], 
-                                   atol=eps)
-                assert np.allclose([maxBounds.x, maxBounds.y, maxBounds.z], 
-                                   [maxRefBounds.x, maxRefBounds.y, maxRefBounds.z], 
-                                   atol=eps)
             else:
                 raise Exception('Unknown mode type for acoustic object shape: %s' % (mode))
         
-            model.reparentTo(node)
+            model.reparentTo(nodePath)
             
             material = Material()
             intensity = np.mean(1.0 - coefficients)
@@ -1257,25 +1243,21 @@ class EvertAcousticWorld(AcousticWorld):
             material.setDiffuse((intensity, intensity, intensity, 1))
             model.clearMaterial()
             model.setMaterial(material, 1)
+            model.setTag('materialId', str(materialId))
+            
+            instance = EvertAcousticObject(self.world, nodePath, transform)
+            obj.setAcousticObject(instance)
+            self.acousticObjects.append(instance)
     
-            # Add polygons to EVERT engine
-            #TODO: for bounding box approximations, we could reduce the number of triangles by
-            #      half if each face of the box was modelled as a single rectangular polygon.
-            polygons, _ = getAcousticPolygonsFromModel(model)
-            for polygon in polygons:
-                polygon.setMaterialId(materialId)
-                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
-    
-        return node
+        return nodePath
     
     def addRoomToScene(self, room, ignoreObjects=False):
 
-        node = self.scene.attachNewNode('room-' + str(room.instanceId))
-        nbRejectedAcousticPolygons = 0
+        nodePath = self.obstacles.attachNewNode('room-' + str(room.instanceId))
         for modelFilename in room.modelFilenames:
             
             partId = os.path.splitext(os.path.basename(modelFilename))[0]
-            objNode = node.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
+            objNode = nodePath.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
             model = self._loadModel(modelFilename)
             model.reparentTo(objNode)
             
@@ -1292,45 +1274,29 @@ class EvertAcousticWorld(AcousticWorld):
             material.setDiffuse((intensity, intensity, intensity, 1))
             model.clearMaterial()
             model.setMaterial(material, 1)
-            
-            # Add polygons to EVERT engine
-            polygons, triangles = getAcousticPolygonsFromModel(model)
-            for polygon, triangle in zip(polygons,triangles):
-                
-                # Validate triangle
-                dims = np.max(triangle, axis=0) - np.min(triangle, axis=0)
-                s = np.sum(np.array(dims > self.minWidthThresholdPolygons, dtype=np.int))
-                if s < 2:
-                    nbRejectedAcousticPolygons += 1
-                    continue
-                
-                polygon.setMaterialId(materialId)
-                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
+            model.setTag('materialId', str(materialId))
             
         if not ignoreObjects:
             for obj in room.objects:
                 objNode = self.addObjectToScene(obj)
-                objNode.reparentTo(node)
-            
-        logger.debug('Number of rejected polygons: %d' % (nbRejectedAcousticPolygons))
-        self.nbTotalRejectedAcousticPolygons += nbRejectedAcousticPolygons
+                objNode.reparentTo(nodePath)
         
-        return node
+        return nodePath
 
     def addHouseToScene(self, house, ignoreObjects=False):
 
-        node = self.scene.attachNewNode('house-' + str(house.instanceId))
+        nodePath = self.obstacles.attachNewNode('house-' + str(house.instanceId))
     
         for room in house.rooms:
             roomNode = self.addRoomToScene(room, ignoreObjects)
-            roomNode.reparentTo(node)
+            roomNode.reparentTo(nodePath)
         
         if not ignoreObjects:
             for obj in house.objects:
                 objNode = self.addObjectToScene(obj)
-                objNode.reparentTo(node)
+                objNode.reparentTo(nodePath)
         
-        return node
+        return nodePath
     
     def _updateSources(self):
         
@@ -1358,8 +1324,29 @@ class EvertAcousticWorld(AcousticWorld):
                                        sourceNetMat.getCell(2,0), sourceNetMat.getCell(2,1), sourceNetMat.getCell(2,2)))
             logger.debug('Static source %s: at position (x=%f, y=%f, z=%f)' % (source.instanceId, sourceNetPos.x, sourceNetPos.y, sourceNetPos.z))
     
-    def updateBSP(self):
+    def updateGeometry(self):
         
+        # Find all model nodes in the graph
+        modelNodes = self.obstacles.findAllMatches('**/+ModelNode')
+        for model in modelNodes:
+    
+            materialId = int(model.getTag('materialId'))
+    
+            # Add polygons to EVERT engine
+            #TODO: for bounding box approximations, we could reduce the number of triangles by
+            #      half if each face of the box was modelled as a single rectangular polygon.
+            polygons, triangles = getAcousticPolygonsFromModel(model)
+            for polygon, triangle in zip(polygons,triangles):
+                
+                # Validate triangle
+                dims = np.max(triangle, axis=0) - np.min(triangle, axis=0)
+                s = np.sum(np.array(dims > self.minWidthThresholdPolygons, dtype=np.int))
+                if s < 2:
+                    continue
+                
+                polygon.setMaterialId(materialId)
+                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
+    
         self._updateSources()
         
         self.world.constructBSP()
@@ -1371,6 +1358,8 @@ class EvertAcousticWorld(AcousticWorld):
                 lst = self.world.getListener(l)
                 solution = PathSolution(self.world, src, lst, self.maximumOrder)
                 self.solutions.append(solution)
+    
+        self.geometryInitialized = True
     
     def _updateListeners(self):
     
@@ -1417,6 +1406,9 @@ class EvertAcousticWorld(AcousticWorld):
     
     def step(self):
         #dt = self.globalClock.getDt()
+        
+        if not self.geometryInitialized:
+            self.updateGeometry()
         
         self._updateListeners()
             
