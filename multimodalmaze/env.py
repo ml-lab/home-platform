@@ -86,7 +86,7 @@ class Observation(object):
 
 
 class BasicEnvironment(object):
-    def __init__(self, suncgDatasetRoot=None):
+    def __init__(self, suncgDatasetRoot=None, size=(256, 256)):
 
         # Create default agent
         self.agent = Agent('agent')
@@ -94,7 +94,7 @@ class BasicEnvironment(object):
         self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
         self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
 
-        self.renderWorld = Panda3dRenderWorld(size=(256, 256), shadowing=False, showCeiling=False)
+        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False)
         self.renderWorld.addDefaultLighting()
         self.renderWorld.addAgentToScene(self.agent)
 
