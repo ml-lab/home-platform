@@ -99,7 +99,7 @@ class HomeEnv(gym.Env):
         return self.observation, reward, done, misc
 
     def _reset(self):
-        # FIXME: maybe in the future we can unload the old house/rooms/objects
+        # TODO maybe in the future we can unload the old house/rooms/objects
         # so we don't have to recreate the Panda3dBulletPhysicWorld
         # and Panda3dRenderWorld on every reset
 
@@ -113,6 +113,8 @@ class HomeEnv(gym.Env):
             self.list_of_houses[self.next_house])
         house = House.loadFromJson(houseFilename, self.data_path)
         self.env.loadHouse(house)
+
+        #TODO move agent to random pos and orientation
 
         self.next_house += 1
 
