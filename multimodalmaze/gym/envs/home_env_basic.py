@@ -34,7 +34,7 @@ class HomeEnv(gym.Env):
         # to their SUNCG dataset in ~/.suncg
         # so that there are folders ~/.suncg/[room|house|...]
         self.data_path = data_dir()
-        print ("SUNCG DATA DIRECTORY:", self.data_path)
+        print ("DEBUG: SUNCG DATA DIRECTORY:", self.data_path)
 
         self.action_space = spaces.MultiDiscrete([[0, 4], [0, 4]])
         self.observation_space = spaces.Discrete(1)
@@ -47,6 +47,7 @@ class HomeEnv(gym.Env):
 
         # self.list_of_houses = get_house_list(DATA_DIR)
         self.list_of_houses = ["0004d52d1aeeb8ae6de39d6bd993e992"]
+        print ("DEBUG: FOUND HOUSES: ", len(self.list_of_houses))
 
         # for determinism we have to load
         # the houses in specific order
