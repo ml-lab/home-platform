@@ -29,54 +29,74 @@ import logging
 import numpy as np
 
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
+import os
 
 logger = logging.getLogger(__name__)
-      
+
+
 def ignoreVariant(modelId):
     suffix = "_0"
     if modelId.endswith(suffix):
-        modelId =  modelId[:len(modelId) - len(suffix)]
+        modelId = modelId[:len(modelId) - len(suffix)]
     return modelId
-      
-class ModelInformation(object):
 
+
+def data_dir():
+    """ Get SUNCG data path (must be symlinked to ~/.suncg)
+
+    :return: Path to suncg dataset
+    """
+
+    path = os.path.join(os.path.abspath(os.path.expanduser('~')), ".suncg")
+    rooms_exist = os.path.isdir(os.path.join(path, "room"))
+    houses_exist = os.path.isdir(os.path.join(path, "house"))
+    if not os.path.isdir(path) or not rooms_exist or not houses_exist:
+        raise Exception("Couldn't find the SUNCG dataset in '~/.suncg'. "
+                        "Please symlink the dataset there, so that the folders "
+                        "'~/.suncg/room', '~/.suncg/house', etc. exist.")
+
+    return path
+
+
+class ModelInformation(object):
     header = 'id,front,nmaterials,minPoint,maxPoint,aligned.dims,index,variantIds'
 
     def __init__(self, filename):
         self.model_info = {}
-        
+
         self._parseFromCSV(filename)
-        
+
     def _parseFromCSV(self, filename):
         with open(filename, 'rb') as f:
             reader = csv.reader(f, delimiter=',')
-            for i,row in enumerate(reader):
+            for i, row in enumerate(reader):
                 if i == 0:
                     rowStr = ','.join(row)
                     assert rowStr == ModelInformation.header
                 else:
-                    model_id, front, nmaterials, minPoint, maxPoint, aligned_dims, _, variantIds = row
+                    model_id, front, nmaterials, minPoint, \
+                    maxPoint, aligned_dims, _, variantIds = row
                     if model_id in self.model_info:
                         raise Exception('Model %s already exists!' % (model_id))
-                    
+
                     front = np.fromstring(front, dtype=np.float64, sep=',')
                     nmaterials = int(nmaterials)
                     minPoint = np.fromstring(minPoint, dtype=np.float64, sep=',')
                     maxPoint = np.fromstring(maxPoint, dtype=np.float64, sep=',')
                     aligned_dims = np.fromstring(aligned_dims, dtype=np.float64, sep=',')
                     variantIds = variantIds.split(',')
-                    self.model_info[model_id] = {'front':front,
-                                                 'nmaterials':nmaterials,
-                                                 'minPoint':minPoint,
-                                                 'maxPoint':maxPoint,
-                                                 'aligned_dims':aligned_dims,
-                                                 'variantIds':variantIds}
+                    self.model_info[model_id] = {'front': front,
+                                                 'nmaterials': nmaterials,
+                                                 'minPoint': minPoint,
+                                                 'maxPoint': maxPoint,
+                                                 'aligned_dims': aligned_dims,
+                                                 'variantIds': variantIds}
 
     def getModelInfo(self, modelId):
         return self.model_info[ignoreVariant(modelId)]
 
-class ModelCategoryMapping(object):
 
+class ModelCategoryMapping(object):
     def __init__(self, filename):
         self.model_id = []
         self.fine_grained_class = {}
@@ -84,22 +104,24 @@ class ModelCategoryMapping(object):
         self.nyuv2_40class = {}
         self.wnsynsetid = {}
         self.wnsynsetkey = {}
-        
+
         self._parseFromCSV(filename)
-        
+
     def _parseFromCSV(self, filename):
         with open(filename, 'rb') as f:
             reader = csv.reader(f, delimiter=',')
-            for i,row in enumerate(reader):
+            for i, row in enumerate(reader):
                 if i == 0:
                     rowStr = ','.join(row)
                     assert rowStr == MODEL_CATEGORY_MAPPING["header"]
                 else:
-                    _, model_id, fine_grained_class, coarse_grained_class, _, nyuv2_40class, wnsynsetid, wnsynsetkey = row
+                    _, model_id, fine_grained_class, \
+                    coarse_grained_class, _, nyuv2_40class, \
+                    wnsynsetid, wnsynsetkey = row
                     if model_id in self.model_id:
                         raise Exception('Model %s already exists!' % (model_id))
                     self.model_id.append(model_id)
-                    
+
                     self.fine_grained_class[model_id] = fine_grained_class
                     self.coarse_grained_class[model_id] = coarse_grained_class
                     self.nyuv2_40class[model_id] = nyuv2_40class
@@ -110,74 +132,73 @@ class ModelCategoryMapping(object):
         for c in sorted(set(self.fine_grained_class.values())):
             name = c.replace("_", " ")
             print "'%s':'%s'," % (c, name)
-    
+
     def _printCoarseGrainedClassListAsDict(self):
         for c in sorted(set(self.coarse_grained_class.values())):
             name = c.replace("_", " ")
             print "'%s':'%s'," % (c, name)
-    
+
     def getFineGrainedCategoryForModelId(self, modelId):
         return self.fine_grained_class[ignoreVariant(modelId)]
-    
+
     def getCoarseGrainedCategoryForModelId(self, modelId):
         return self.coarse_grained_class[ignoreVariant(modelId)]
-    
+
     def getFineGrainedClassList(self):
         return sorted(set(self.fine_grained_class.values()))
-    
+
     def getCoarseGrainedClassList(self):
         return sorted(set(self.coarse_grained_class.values()))
-    
+
 
 class ObjectVoxelData(object):
-    
     def __init__(self, voxels, translation, scale):
         self.voxels = voxels
         self.translation = translation
         self.scale = scale
-    
+
     def getFilledVolume(self):
         nbFilledVoxels = np.count_nonzero(self.voxels)
         perVoxelVolume = self.scale / np.prod(self.voxels.shape)
         return nbFilledVoxels * perVoxelVolume
-    
+
     @staticmethod
     def fromFile(filename):
-        
+
         with open(filename, 'rb') as f:
-            
+
             # Read header line and version
-            line = f.readline().decode('ascii').strip() # u'#binvox 1'
+            line = f.readline().decode('ascii').strip()  # u'#binvox 1'
             header, version = line.split(" ")
             if header != '#binvox':
                 raise Exception('Unable to read header from file: %s' % (filename))
             version = int(version)
             assert version == 1
-            
+
             # Read dimensions and transforms
-            line = f.readline().decode('ascii').strip() # u'dim 128 128 128'
+            line = f.readline().decode('ascii').strip()  # u'dim 128 128 128'
             items = line.split(" ")
             assert items[0] == 'dim'
             depth, height, width = np.fromstring(" ".join(items[1:]), sep=' ', dtype=np.int)
-            
+
             # XXX: what is this translation component?
-            line = f.readline().decode('ascii').strip() # u'translate -0.176343 -0.356254 0.000702'
+            line = f.readline().decode('ascii').strip()  # u'translate -0.176343 -0.356254 0.000702'
             items = line.split(" ")
             assert items[0] == 'translate'
             translation = np.fromstring(" ".join(items[1:]), sep=' ', dtype=np.float)
-            
-            line = f.readline().decode('ascii').strip() # u'scale 0.863783'
+
+            line = f.readline().decode('ascii').strip()  # u'scale 0.863783'
             items = line.split(" ")
             assert items[0] == 'scale'
             scale = float(items[1])
-            
+
             # Read voxel data
-            line = f.readline().decode('ascii').strip() # u'data'
+            line = f.readline().decode('ascii').strip()  # u'data'
             assert line == 'data'
-            
+
             size = width * height * depth
             voxels = np.zeros((size,), dtype=np.int8)
-            
+
             nrVoxels = 0
             index = 0
             endIndex = 0
@@ -186,19 +207,18 @@ class ObjectVoxelData(object):
                 count = np.fromstring(f.read(1), dtype=np.uint8)[0]
                 endIndex = index + count
                 assert endIndex <= size
-                
+
                 voxels[index:endIndex] = value
                 if value != 0:
                     nrVoxels += count
                 index = endIndex
-            
+
             # NOTE: we should by now have reach the end of the file
             assert f.readline() == ''
-            
+
             # FIXME: not sure about the particular dimension ordering here!
             voxels = voxels.reshape((width, height, depth))
-            
+
             logger.debug('Number of non-empty voxels read from file: %d' % (nrVoxels))
-        
+
         return ObjectVoxelData(voxels, translation, scale)
-    

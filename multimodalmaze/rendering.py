@@ -365,6 +365,8 @@ class Panda3dRenderWorld(RenderWorld):
         agent.assertConsistency()
         
         self.agent = agent
+
+        return nodePath # for backwards compatibility
         
     def addObjectToScene(self, obj):
 
