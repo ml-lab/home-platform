@@ -146,7 +146,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
                               [0.0, 0.0, 0.0, 1.0]])
         obj = Object(instanceId, modelId, modelFilename)
         obj.setTransform(transform)
-        roomNode = engine.addObjectToScene(obj, mode='exact')
+        roomNode = engine.addObjectToScene(obj, mode='mesh')
         roomNode.setRenderModeWireframe()
         
         # Define a listening agent
@@ -175,13 +175,13 @@ class TestEvertAcousticWorld(unittest.TestCase):
         sourceNode = engine.addStaticSourceToScene(source)
         sourceNode.setPos(0.0, 0.0, 0.0)
         
+        engine.updateGeometry()
+        
         center = engine.world.getCenter()
         self.assertTrue(np.allclose(engine.world.getMaxLength(), roomSize * 1000.0))
         self.assertTrue(np.allclose([center.x, center.y, center.z],[0.0, 0.0, 0.0]))
         self.assertTrue(engine.world.numElements() == 12)
         self.assertTrue(engine.world.numConvexElements() == 12)
-        
-        engine.updateBSP()
         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
@@ -274,34 +274,23 @@ class TestEvertAcousticWorld(unittest.TestCase):
         refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
         
         # Define a listening agent
-        agentSize = 0.1
         instanceId = 'agent'
-        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
-        transform = np.array([[agentSize, 0.0, 0.0, 0.0],
-                              [0.0, agentSize, 0.0, 0.0],
-                              [0.0, 0.0, agentSize, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
-        agent = Agent(instanceId, modelFilename)
-        agent.setTransform(transform)
-        agentNode = engine.addAgentToScene(agent, interauralDistance=0.5)
-        agentNode.setHpr(90,0,0)
-        agentNode.setPos(LVector3f(-2.0, 1.0, -0.75) + refCenter)
+        agent = Agent(instanceId)
+        agent.setOrientation((0, 0, np.pi/2))
+        agent.setPosition(np.array([-2.0, 1.0, -0.75]) + 
+                          np.array([refCenter.x, refCenter.y, refCenter.z]))
+        
+        engine.addAgentToScene(agent, interauralDistance=0.5)
         
         # Define a sound source
-        sourceSize = 0.25
         instanceId = 'source'
         modelId = '0'
-        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
-        transform = np.array([[sourceSize, 0.0, 0.0, 0.0],
-                              [0.0, sourceSize, 0.0, 0.0],
-                              [0.0, 0.0, sourceSize, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
-        source = Object(instanceId, modelId, modelFilename)
-        source.setTransform(transform)
-        sourceNode = engine.addStaticSourceToScene(source)
-        sourceNode.setPos(LVector3f(1.5, -1.0, -0.25) + refCenter)
+        source = Object(instanceId, modelId)
+        engine.addStaticSourceToScene(source)
+        source.setPosition(np.array([1.5, -1.0, -0.25]) + 
+                           np.array([refCenter.x, refCenter.y, refCenter.z]))
 
-        engine.updateBSP()
+        engine.updateGeometry()
         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
@@ -312,12 +301,18 @@ class TestEvertAcousticWorld(unittest.TestCase):
         engine.setCamera(mat)
         
         engine.step()
-        image = engine.getRgbImage()
+        image1 = engine.getRgbImage()
+        
+        agent.setPosition(agent.getPosition() + np.array([-0.5, 0.5, 0.0]))
+        engine.step()
+        image2 = engine.getRgbImage()
         
         fig = plt.figure()
         plt.axis("off")
-        ax = plt.subplot(111)
-        ax.imshow(image)
+        ax = plt.subplot(121)
+        ax.imshow(image1)
+        ax = plt.subplot(122)
+        ax.imshow(image2)
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
@@ -352,7 +347,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
         minRefBounds, maxRefBounds = roomNode.getTightBounds()
         refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
         
-        engine.updateBSP()
+        engine.updateGeometry()
         
         sga = SceneGraphAnalyzer()
         sga.addNode(engine.render.node())
@@ -385,3 +380,7 @@ if __name__ == '__main__':
     np.seterr(all='raise')
     unittest.main()
     
+    suite = unittest.TestSuite()
+    suite.addTest(TestEvertAcousticWorld("testRenderRoom"))
+    runner = unittest.TextTestRunner()
+    runner.run(suite)
