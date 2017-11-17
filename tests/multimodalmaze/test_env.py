@@ -46,7 +46,7 @@ class TestBasicEnvironment(unittest.TestCase):
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
                                    TEST_SUNCG_DATA_DIR)
         
-        env = BasicEnvironment()
+        env = BasicEnvironment(depth=True)
         env.loadHouse(house)
     
         env.agent.setPosition((42, -39, 1))
@@ -100,7 +100,7 @@ class TestBasicEnvironment(unittest.TestCase):
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
                                    TEST_SUNCG_DATA_DIR)
         
-        env = BasicEnvironment()
+        env = BasicEnvironment(debug=True)
         env.loadHouse(house)
         
         env.agent.setPosition((45, -42, 1))

@@ -694,8 +694,9 @@ class EvertAcousticWorld(AcousticWorld):
 
     def __init__(self, samplingRate=16000, maximumOrder=3, 
                  materialAbsorption=True, frequencyDependent=True,
-                 size=(512,512), showCeiling=True):
+                 size=(512,512), showCeiling=True, debug=False):
 
+        self.debug = debug
         self.samplingRate = samplingRate
         self.maximumOrder = maximumOrder
         self.materialAbsorption = materialAbsorption
@@ -731,9 +732,16 @@ class EvertAcousticWorld(AcousticWorld):
         # Rendering attributes
         self.size = size
         self.showCeiling = showCeiling
-        self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+        
         self.loader = Loader.getGlobalPtr()
-        self.graphicsEngine.setDefaultLoader(self.loader)
+        
+        if self.debug:
+            self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+            self.graphicsEngine.setDefaultLoader(self.loader)
+        
+            selection = GraphicsPipeSelection.getGlobalPtr()
+            self.pipe = selection.makeDefaultPipe()
+            logger.debug('Using %s' % (self.pipe.getInterfaceName()))
         
         self.render = NodePath('render')
         self.render.setAttrib(RescaleNormalAttrib.makeDefault())
@@ -741,19 +749,16 @@ class EvertAcousticWorld(AcousticWorld):
         self.render.setAntialias(AntialiasAttrib.MAuto)
         self.render.setTextureOff(1)
         
-        selection = GraphicsPipeSelection.getGlobalPtr()
-        self.pipe = selection.makeDefaultPipe()
-        logger.debug('Using %s' % (self.pipe.getInterfaceName()))
-        
         self.camera = self.render.attachNewNode(ModelNode('camera'))
         self.camera.node().setPreserveTransform(ModelNode.PTLocal)
         
         self.scene = self.render.attachNewNode('scene')
         self.obstacles = self.scene.attachNewNode('obstacles')
         
-        self._initRgbCapture()
-        self._addDefaultLighting()
-        self._preloadRayModels()
+        if self.debug:
+            self._initRgbCapture()
+            self._addDefaultLighting()
+            self._preloadRayModels()
         
     def _initRgbCapture(self):
 
@@ -805,18 +810,23 @@ class EvertAcousticWorld(AcousticWorld):
         self.scene.setLight(plnp)
         
     def destroy(self):
-        self.graphicsEngine.removeAllWindows()
-        del self.pipe
+        if self.debug:
+            self.graphicsEngine.removeAllWindows()
+            del self.pipe
 
     def setCamera(self, mat):
         mat = Mat4(*mat.ravel())
         self.camera.setMat(mat)
 
     def getRgbImage(self, channelOrder="RGBA"):
-        data = self.rgbTex.getRamImageAs(channelOrder)
-        image = np.frombuffer(data.get_data(), np.uint8)
-        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
-        image = np.flipud(image)
+        if self.debug:
+            data = self.rgbTex.getRamImageAs(channelOrder)
+            image = np.frombuffer(data.get_data(), np.uint8)
+            image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
+            image = np.flipud(image)
+        else:
+            image = np.zeros((self.size[0], self.size[1], 3), dtype=np.uint8)
+            
         return image
     
     def visualize(self):
@@ -825,7 +835,7 @@ class EvertAcousticWorld(AcousticWorld):
         viewer = Viewer(self.world, self.maximumOrder)
         viewer.show()
     
-    def renderInfo(self):
+    def _renderInfo(self):
         sga = SceneGraphAnalyzer()
         sga.addNode(self.render.node())
         
@@ -1425,7 +1435,8 @@ class EvertAcousticWorld(AcousticWorld):
         for solution in self.solutions:
             solution.update()
         
-        #NOTE: we may need to call frame rendering twice because of double-buffering
-        self._renderAcousticSolutions()
-        self.graphicsEngine.renderFrame()
+        if self.debug:
+            #NOTE: we may need to call frame rendering twice because of double-buffering
+            self._renderAcousticSolutions()
+            self.graphicsEngine.renderFrame()
         

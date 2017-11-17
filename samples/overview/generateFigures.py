@@ -52,11 +52,11 @@ class BasicEnvironment(object):
         # Create default agent
         self.agent = Agent('agent')
 
-        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False)
+        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False, depth=True)
         self.renderWorld.addDefaultLighting()
         self.renderWorld.addAgentToScene(self.agent)
 
-        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=3, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=True)
         self.acousticWorld.minRayRadius = 0.02
         self.acousticWorld.rayColors = [
                     (1.0, 0.0, 0.0, 1.0), # red

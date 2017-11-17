@@ -101,13 +101,14 @@ class Panda3dRenderWorld(RenderWorld):
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=75.0):
+    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=75.0, depth=True):
         
         self.size = size
         self.mode = mode
         self.zNear = zNear
         self.zFar = zFar
         self.fov = fov
+        self.depth = depth
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
         self.graphicsEngine.setDefaultLoader(self.loader)
@@ -126,7 +127,9 @@ class Panda3dRenderWorld(RenderWorld):
         self.scene = self.render.attachNewNode('scene')
         
         self._initRgbCapture()
-        self._initDepthCapture()
+        
+        if self.depth:
+            self._initDepthCapture()
         
         self.__dict__.update(shadowing=shadowing, showCeiling=showCeiling)
 
@@ -243,32 +246,37 @@ class Panda3dRenderWorld(RenderWorld):
         return image
     
     def getDepthImage(self, mode='normalized'):
-        data = self.depthTex.getRamImage().get_data()
-        nbBytesComponentFromData = len(data) / (self.depthTex.getYSize() * self.depthTex.getXSize())
-        if nbBytesComponentFromData == 4:
-            depthImage = np.frombuffer(data, np.float32) # Must match Texture.TFloat
-        elif nbBytesComponentFromData == 2:
-            # NOTE: This can happen on some graphic hardware, where unsigned 16-bit data is stored
-            #       despite setting the texture component type to 32-bit floating point.
-            depthImage = np.frombuffer(data, np.uint16).astype()
-            depthImage = depthImage.astype(np.float32) / 65535
-            
-        depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize())
-        depthImage = np.flipud(depthImage)
         
-        if mode == 'distance':
-            # NOTE: in Panda3d, the returned depth image seems to be already linearized
-            depthImage = self.zNear + depthImage / (self.zFar - self.zNear)
-
-            # Adapted from: https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
-            #depthImage = 2.0 * depthImage - 1.0
-            #depthImage = 2.0 * self.zNear * self.zFar / (self.zFar + self.zNear - depthImage * (self.zFar - self.zNear))
+        if self.depth:
+        
+            data = self.depthTex.getRamImage().get_data()
+            nbBytesComponentFromData = len(data) / (self.depthTex.getYSize() * self.depthTex.getXSize())
+            if nbBytesComponentFromData == 4:
+                depthImage = np.frombuffer(data, np.float32) # Must match Texture.TFloat
+            elif nbBytesComponentFromData == 2:
+                # NOTE: This can happen on some graphic hardware, where unsigned 16-bit data is stored
+                #       despite setting the texture component type to 32-bit floating point.
+                depthImage = np.frombuffer(data, np.uint16).astype()
+                depthImage = depthImage.astype(np.float32) / 65535
+                
+            depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize())
+            depthImage = np.flipud(depthImage)
             
-        elif mode == 'normalized':
-            # Nothing to do
-            pass
+            if mode == 'distance':
+                # NOTE: in Panda3d, the returned depth image seems to be already linearized
+                depthImage = self.zNear + depthImage / (self.zFar - self.zNear)
+    
+                # Adapted from: https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
+                #depthImage = 2.0 * depthImage - 1.0
+                #depthImage = 2.0 * self.zNear * self.zFar / (self.zFar + self.zNear - depthImage * (self.zFar - self.zNear))
+                
+            elif mode == 'normalized':
+                # Nothing to do
+                pass
+            else:
+                raise Exception('Unsupported output depth image mode: %s' % (mode))
         else:
-            raise Exception('Unsupported output depth image mode: %s' % (mode))
+            depthImage = np.zeros(self.size, dtype=np.float32)
         
         return depthImage
 

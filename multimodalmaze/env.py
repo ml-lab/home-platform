@@ -89,7 +89,7 @@ class Observation(object):
 
 
 class BasicEnvironment(object):
-    def __init__(self, suncgDatasetRoot=None, size=(256, 256)):
+    def __init__(self, suncgDatasetRoot=None, size=(256, 256), debug=False, depth=False):
 
         # Create default agent
         self.agent = Agent('agent')
@@ -97,11 +97,11 @@ class BasicEnvironment(object):
         self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
         self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
 
-        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False)
+        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False, depth=depth)
         self.renderWorld.addDefaultLighting()
         self.renderWorld.addAgentToScene(self.agent)
 
-        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=debug)
         self.acousticWorld.addAgentToScene(self.agent)
         
         self.worlds = {
