@@ -46,6 +46,8 @@ def getFpsAll(nbSteps):
     end = timer()
     elapsed = (end - start)
     
+    env.destroy()
+    
     fps = nbSteps/elapsed
     return fps
 
@@ -57,6 +59,8 @@ def getFpsRenderOnly(nbSteps):
     env.simulate(nbSteps=nbSteps)
     end = timer()
     elapsed = (end - start)
+    
+    env.destroy()
     
     fps = nbSteps/elapsed
     return fps
@@ -70,6 +74,8 @@ def getFpsPhysicsOnly(nbSteps):
     end = timer()
     elapsed = (end - start)
     
+    env.destroy()
+    
     fps = nbSteps/elapsed
     return fps
 
@@ -82,12 +88,14 @@ def getFpsAcousticsOnly(nbSteps):
     end = timer()
     elapsed = (end - start)
     
+    env.destroy()
+    
     fps = nbSteps/elapsed
     return fps
 
 def main():
     
-    nbSteps = 100
+    nbSteps = 4000
     print 'FPS (all): ', getFpsAll(nbSteps)
     print 'FPS (render-only): ',  getFpsRenderOnly(nbSteps)
     print 'FPS (physics-only): ',  getFpsPhysicsOnly(nbSteps)
