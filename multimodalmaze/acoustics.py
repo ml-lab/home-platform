@@ -1354,7 +1354,7 @@ class EvertAcousticWorld(AcousticWorld):
                     continue
                 
                 polygon.setMaterialId(materialId)
-                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
+                self.world.addPolygon(polygon, Vector3(1.0,1.0,1.0))
     
         self._updateSources()
         

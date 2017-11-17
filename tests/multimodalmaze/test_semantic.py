@@ -140,7 +140,7 @@ class TestDimensionTable(unittest.TestCase):
         self.assertTrue(dimensionDescription == 'normal')
        
 class TestSuncgSemanticWorld(unittest.TestCase):
-     
+    
     def testInit(self):
         _ = SuncgSemanticWorld(TEST_SUNCG_DATA_DIR)
         
@@ -153,7 +153,7 @@ class TestSuncgSemanticWorld(unittest.TestCase):
         instanceId = str(modelId) + '-0'
         obj = Object(instanceId, modelId, modelFilename)
         desc = world.describeObject(obj)
-        self.assertTrue(desc == "linen coffee table made of wood")
+        self.assertTrue(desc == "small linen coffee table made of wood")
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

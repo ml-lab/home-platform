@@ -249,12 +249,10 @@ class SuncgSemanticWorld(SemanticWorld):
         modelCatFilename = os.path.join(self.datasetRoot,
                                         'metadata',
                                         'ModelCategoryMapping.csv')
-        size = DimensionTable.getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
+        desc = DimensionTable.getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
         
-        if size == 'normal':
+        if desc == 'normal':
             desc = ''
-        else:
-            desc = size + '-sized'
         return desc
     
     def describeObject(self, obj):
