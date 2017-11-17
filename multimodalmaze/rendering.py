@@ -33,8 +33,7 @@ import scipy.ndimage
 
 from panda3d.core import VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
                          GeomVertexReader, GeomTristrips, GeomTriangles, LineStream, SceneGraphAnalyzer, \
-                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState,\
-    GeomEnums
+                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState, GeomEnums
                          
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
@@ -102,12 +101,13 @@ class Panda3dRenderWorld(RenderWorld):
     #TODO: add a debug mode showing wireframe only?
     #      render.setRenderModeWireframe()
 
-    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0):
+    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=75.0):
         
         self.size = size
         self.mode = mode
         self.zNear = zNear
         self.zFar = zFar
+        self.fov = fov
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
         self.graphicsEngine.setDefaultLoader(self.loader)
@@ -136,7 +136,8 @@ class Panda3dRenderWorld(RenderWorld):
 
         camNode = Camera('RGB camera')
         lens = PerspectiveLens()
-        lens.setAspectRatio(1.0)
+        lens.setFov(self.fov)
+        lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
         lens.setNear(self.zNear)
         lens.setFar(self.zFar)
         camNode.setLens(lens)
@@ -182,7 +183,8 @@ class Panda3dRenderWorld(RenderWorld):
         
         camNode = Camera('Depth camera')
         lens = PerspectiveLens()
-        lens.setAspectRatio(1.0)
+        lens.setFov(self.fov)
+        lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
         lens.setNear(self.zNear)
         lens.setFar(self.zFar)
         camNode.setLens(lens)
@@ -383,6 +385,9 @@ class Panda3dRenderWorld(RenderWorld):
     def addHouseToScene(self, house):
 
         for room in house.rooms:
+            self.addRoomToScene(room)
+        
+        for room in house.grounds:
             self.addRoomToScene(room)
         
         for idx, obj in enumerate(house.objects):

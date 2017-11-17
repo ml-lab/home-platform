@@ -210,12 +210,13 @@ class TextureAbsorptionTable(object):
                 if "wood" in texture:
                     texture = "wood"
                     
-            if texture in TextureAbsorptionTable.textures:
-                category, material = TextureAbsorptionTable.textures[texture]
-                coefficients, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material, units='normalized')
-                totalCoefficients += area * coefficients
-            else:
-                raise Exception('Unsupported texture basename for material acoustics: %s' % (texture))
+            if not texture in TextureAbsorptionTable.textures:
+                logger.warn('Unsupported texture basename for material acoustics: %s' % (texture))
+                texture = 'default'
+                
+            category, material = TextureAbsorptionTable.textures[texture]
+            coefficients, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material, units='normalized')
+            totalCoefficients += area * coefficients
         
         if units == 'dB':
             eps = np.finfo(np.float).eps
@@ -668,10 +669,13 @@ class EvertAcousticWorld(AcousticWorld):
 
     # NOTE: the model ids of objects that correspond to opened doors. They will be ignored in the acoustic scene.
     openedDoorModelIds = [
+                            # Doors
                             '122', '133', '214', '246', '247', '361', '73','756','757','758','759','760',
                             '761','762','763','764','765', '768','769','770','771','778','779','780',
                             's__1762','s__1763','s__1764','s__1765','s__1766','s__1767','s__1768','s__1769',
                             's__1770','s__1771','s__1772','s__1773',
+                            # Curtains
+                            '275'
                          ]
 
     rayColors = [
@@ -755,6 +759,7 @@ class EvertAcousticWorld(AcousticWorld):
 
         camNode = Camera('RGB camera')
         lens = PerspectiveLens()
+        lens.setFov(75.0)
         lens.setAspectRatio(1.0)
         lens.setNear(0.1)
         lens.setFar(1000.0)
@@ -1061,7 +1066,7 @@ class EvertAcousticWorld(AcousticWorld):
         for i, solution in enumerate(self.solutions):
             
             # Rotate amongst colors of the predefined table
-            color = EvertAcousticWorld.rayColors[i%len(EvertAcousticWorld.rayColors)]
+            color = self.rayColors[i%len(self.rayColors)]
             
             # Sort by increasing path lengh
             paths = []
@@ -1288,6 +1293,10 @@ class EvertAcousticWorld(AcousticWorld):
         nodePath = self.obstacles.attachNewNode('house-' + str(house.instanceId))
     
         for room in house.rooms:
+            roomNode = self.addRoomToScene(room, ignoreObjects)
+            roomNode.reparentTo(nodePath)
+        
+        for room in house.grounds:
             roomNode = self.addRoomToScene(room, ignoreObjects)
             roomNode.reparentTo(nodePath)
         

@@ -219,6 +219,7 @@ class SemanticWorld(object):
 
 class SuncgSemanticWorld(SemanticWorld):
     def __init__(self, datasetRoot):
+        self.datasetRoot = datasetRoot
         self.categoryMapping = ModelCategoryMapping(
             os.path.join(
                 datasetRoot,
@@ -241,9 +242,27 @@ class SuncgSemanticWorld(SemanticWorld):
         desc = 'made of ' + ','.join(materials)
         return desc
 
+    def _describeObjectSize(self, obj):
+        modelInfoFilename = os.path.join(self.datasetRoot,
+                                        'metadata',
+                                        'models.csv')
+        modelCatFilename = os.path.join(self.datasetRoot,
+                                        'metadata',
+                                        'ModelCategoryMapping.csv')
+        size = DimensionTable.getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
+        
+        if size == 'normal':
+            desc = ''
+        else:
+            desc = size + '-sized'
+        return desc
+    
     def describeObject(self, obj):
         items = []
 
+        sizeDescription = self._describeObjectSize(obj)
+        items.append(sizeDescription)
+        
         # TODO: color attribute of the main material RGB values
         colorDescription = self._describeObjectColor(obj)
         items.append(colorDescription)

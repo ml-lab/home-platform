@@ -231,14 +231,20 @@ class Room(object):
     
 #TODO: add support for multiple levels
     
+class Ground(Room):
+    pass
+    
 class House(object):
     
-    def __init__(self, sceneId, rooms=None, objects=None, showCeiling=True):
+    def __init__(self, sceneId, rooms=None, objects=None, grounds=None, showCeiling=True):
         self.instanceId = sceneId
         self.sceneId = sceneId
         if rooms is None:
             rooms = []
         self.rooms = rooms
+        if grounds is None:
+            grounds = []
+        self.grounds = grounds
         if objects is None:
             objects = []
         self.objects = objects
@@ -271,6 +277,7 @@ class House(object):
         objectIds = {}
         objects = []
         rooms = []
+        grounds = []
         sceneId = data['id']
         for levelId, level in enumerate(data['levels']):
             logger.debug('Loading Level %s to scene' % (str(levelId)))
@@ -298,8 +305,9 @@ class House(object):
                     room = Room(modelId, sceneId, levelId, modelFilenames)
                     rooms.append(room)
                     
-                    for childNodeIndex in node['nodeIndices']:
-                        roomByNodeIndex[childNodeIndex] = room
+                    if 'nodeIndices' in node:
+                        for childNodeIndex in node['nodeIndices']:
+                            roomByNodeIndex[childNodeIndex] = room
                     
                 elif node['type'] == 'Object':
                     
@@ -343,10 +351,35 @@ class House(object):
                     if nodeIndex in roomByNodeIndex:
                         room = roomByNodeIndex[nodeIndex]
                         room.objects.append(obj)
+                    else:
+                        objects.append(obj)
 
                     obj.attributes['room'] = room
                     obj.attributes['level'] = levelId
+                
+                elif node['type'] == 'Ground':
+                    
+                    logger.debug('Loading Ground %s to scene' % (modelId))
+                    
+                    # Get ground model filenames
+                    modelFilenames = []
+                    for groundObjFilename in glob.glob(os.path.join(datasetRoot, 'room', sceneId, modelId + '*.obj')):
+                        
+                        # Convert extension from OBJ + MTL to EGG format
+                        f, _ = os.path.splitext(groundObjFilename)
+                        modelFilename = f + ".egg"
+                        if not os.path.exists(modelFilename):
+                            raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
+                        modelFilenames.append(modelFilename)
+                    
+                    ground = Ground(modelId, sceneId, levelId, modelFilenames)
+                    grounds.append(ground)
+                    
+                    if 'nodeIndices' in node:
+                        for childNodeIndex in node['nodeIndices']:
+                            roomByNodeIndex[childNodeIndex] = room
+                
                 else:
                     raise Exception('Unsupported node type: %s' % (node['type']))
                 
-        return House(sceneId, rooms, objects)
+        return House(sceneId, rooms, objects, grounds)
