@@ -29,6 +29,7 @@ import glob
 import json
 import logging
 import numpy as np
+from panda3d.core import LVector3f
 
 logger = logging.getLogger(__name__)
 
@@ -112,6 +113,11 @@ class Object(object):
         if self.physicInstance is not None:
             self.physicInstance.setLinearVelocity(velocity)
     
+    def addLinearImpulse(self, impulse):
+        if self.physicInstance is not None:
+            print("applying impulse")
+            self.physicInstance.applyImpulse(impulse)
+
     def setAngularVelocity(self, velocity):
         if self.physicInstance is not None:
             self.physicInstance.setAngularVelocity(velocity)

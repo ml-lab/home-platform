@@ -33,8 +33,9 @@ class HomeEnv(gym.Env):
 
     """
 
-    def __init__(self, turning_speed=0.1):
-        self.turning_speed = turning_speed  # how fast is the camera moving
+    def __init__(self, turning_speed=0.1, moving_speed=100):
+        self.turning_speed = turning_speed  # how fast is the camera turning
+        self.moving_speed = moving_speed  # how fast is the agent moving
 
         self.metadata = {'render.modes': ['human', 'rgb_array']}
 
@@ -91,31 +92,43 @@ class HomeEnv(gym.Env):
 
     def executeLooking(self, action):
         new_orientation = self.observation["orientation"]
-        print ("old orientation:", new_orientation)
 
         if action == 0:
             pass  # NOOP
         elif action == 1:
             new_orientation[0] -= self.turning_speed
-            pass
         elif action == 2:
             new_orientation[2] += self.turning_speed
-            pass
         elif action == 3:
             new_orientation[0] += self.turning_speed
-            pass
         elif action == 4:
             new_orientation[2] -= self.turning_speed
-            pass
         else:
             raise Exception("Received unknown 'looking' action: {}. "
-                            "Try an integer in the range from and including 0-4.".format(action))
+                            "Try an integer in the range between and including 0-4.".format(action))
 
-        print ("new orientation:", new_orientation)
         self.env.agent.setOrientation(new_orientation)
 
     def executeMoving(self, action):
-        pass
+        new_impulse = [0.0, 0.0, 0.0]  # impulse = force * time
+
+        if action == 0:
+            pass  # NOOP
+        elif action == 1:
+            new_impulse[1] += self.moving_speed
+        elif action == 2:
+            new_impulse[0] += self.moving_speed
+        elif action == 3:
+            new_impulse[1] -= self.moving_speed
+        elif action == 4:
+            new_impulse[0] -= self.moving_speed
+        else:
+            raise Exception("Received unknown 'moving' action: {}. "
+                            "Try an integer in the range between and including 0-4.".format(action))
+
+        print ("new impulse:", new_impulse)
+        self.env.agent.addLinearImpulse(new_impulse)
+        # self.env.physicWorld.move_agent(new_impulse)
 
     def _step(self, action):
         assert self.action_space.contains(action)
@@ -205,13 +218,11 @@ if __name__ == '__main__':
 
     env.render("human")
 
-    for _ in range(5):
-        # action = env.action_space.sample()
-        # print ("action:", action)
+    for i in range(20):
+        action = env.action_space.sample()
+        print ("action:", action)
 
-        # quit()
-        action = [0, 4]  # looking up test
         obs, rew, done, misc = env.step(action)
         env.render("human")
-        time.sleep(1)
+        time.sleep(.5)
         # print ("obs:", obs, "rew:", rew, "done:", done, "misc:", misc)
