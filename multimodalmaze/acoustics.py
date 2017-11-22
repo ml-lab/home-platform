@@ -210,12 +210,13 @@ class TextureAbsorptionTable(object):
                 if "wood" in texture:
                     texture = "wood"
                     
-            if texture in TextureAbsorptionTable.textures:
-                category, material = TextureAbsorptionTable.textures[texture]
-                coefficients, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material, units='normalized')
-                totalCoefficients += area * coefficients
-            else:
-                raise Exception('Unsupported texture basename for material acoustics: %s' % (texture))
+            if not texture in TextureAbsorptionTable.textures:
+                logger.warn('Unsupported texture basename for material acoustics: %s' % (texture))
+                texture = 'default'
+                
+            category, material = TextureAbsorptionTable.textures[texture]
+            coefficients, _ = MaterialAbsorptionTable.getAbsorptionCoefficients(category, material, units='normalized')
+            totalCoefficients += area * coefficients
         
         if units == 'dB':
             eps = np.finfo(np.float).eps
@@ -668,10 +669,13 @@ class EvertAcousticWorld(AcousticWorld):
 
     # NOTE: the model ids of objects that correspond to opened doors. They will be ignored in the acoustic scene.
     openedDoorModelIds = [
+                            # Doors
                             '122', '133', '214', '246', '247', '361', '73','756','757','758','759','760',
                             '761','762','763','764','765', '768','769','770','771','778','779','780',
                             's__1762','s__1763','s__1764','s__1765','s__1766','s__1767','s__1768','s__1769',
                             's__1770','s__1771','s__1772','s__1773',
+                            # Curtains
+                            '275'
                          ]
 
     rayColors = [
@@ -690,8 +694,9 @@ class EvertAcousticWorld(AcousticWorld):
 
     def __init__(self, samplingRate=16000, maximumOrder=3, 
                  materialAbsorption=True, frequencyDependent=True,
-                 size=(512,512), showCeiling=True):
+                 size=(512,512), showCeiling=True, debug=False):
 
+        self.debug = debug
         self.samplingRate = samplingRate
         self.maximumOrder = maximumOrder
         self.materialAbsorption = materialAbsorption
@@ -727,9 +732,16 @@ class EvertAcousticWorld(AcousticWorld):
         # Rendering attributes
         self.size = size
         self.showCeiling = showCeiling
-        self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+        
         self.loader = Loader.getGlobalPtr()
-        self.graphicsEngine.setDefaultLoader(self.loader)
+        
+        if self.debug:
+            self.graphicsEngine = GraphicsEngine.getGlobalPtr()
+            self.graphicsEngine.setDefaultLoader(self.loader)
+        
+            selection = GraphicsPipeSelection.getGlobalPtr()
+            self.pipe = selection.makeDefaultPipe()
+            logger.debug('Using %s' % (self.pipe.getInterfaceName()))
         
         self.render = NodePath('render')
         self.render.setAttrib(RescaleNormalAttrib.makeDefault())
@@ -737,24 +749,22 @@ class EvertAcousticWorld(AcousticWorld):
         self.render.setAntialias(AntialiasAttrib.MAuto)
         self.render.setTextureOff(1)
         
-        selection = GraphicsPipeSelection.getGlobalPtr()
-        self.pipe = selection.makeDefaultPipe()
-        logger.debug('Using %s' % (self.pipe.getInterfaceName()))
-        
         self.camera = self.render.attachNewNode(ModelNode('camera'))
         self.camera.node().setPreserveTransform(ModelNode.PTLocal)
         
         self.scene = self.render.attachNewNode('scene')
         self.obstacles = self.scene.attachNewNode('obstacles')
         
-        self._initRgbCapture()
-        self._addDefaultLighting()
-        self._preloadRayModels()
+        if self.debug:
+            self._initRgbCapture()
+            self._addDefaultLighting()
+            self._preloadRayModels()
         
     def _initRgbCapture(self):
 
         camNode = Camera('RGB camera')
         lens = PerspectiveLens()
+        lens.setFov(75.0)
         lens.setAspectRatio(1.0)
         lens.setNear(0.1)
         lens.setFar(1000.0)
@@ -800,18 +810,23 @@ class EvertAcousticWorld(AcousticWorld):
         self.scene.setLight(plnp)
         
     def destroy(self):
-        self.graphicsEngine.removeAllWindows()
-        del self.pipe
+        if self.debug:
+            self.graphicsEngine.removeAllWindows()
+            del self.pipe
 
     def setCamera(self, mat):
         mat = Mat4(*mat.ravel())
         self.camera.setMat(mat)
 
     def getRgbImage(self, channelOrder="RGBA"):
-        data = self.rgbTex.getRamImageAs(channelOrder)
-        image = np.frombuffer(data.get_data(), np.uint8)
-        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
-        image = np.flipud(image)
+        if self.debug:
+            data = self.rgbTex.getRamImageAs(channelOrder)
+            image = np.frombuffer(data.get_data(), np.uint8)
+            image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), self.rgbTex.getNumComponents())
+            image = np.flipud(image)
+        else:
+            image = np.zeros((self.size[0], self.size[1], 3), dtype=np.uint8)
+            
         return image
     
     def visualize(self):
@@ -820,7 +835,7 @@ class EvertAcousticWorld(AcousticWorld):
         viewer = Viewer(self.world, self.maximumOrder)
         viewer.show()
     
-    def renderInfo(self):
+    def _renderInfo(self):
         sga = SceneGraphAnalyzer()
         sga.addNode(self.render.node())
         
@@ -1061,7 +1076,7 @@ class EvertAcousticWorld(AcousticWorld):
         for i, solution in enumerate(self.solutions):
             
             # Rotate amongst colors of the predefined table
-            color = EvertAcousticWorld.rayColors[i%len(EvertAcousticWorld.rayColors)]
+            color = self.rayColors[i%len(self.rayColors)]
             
             # Sort by increasing path lengh
             paths = []
@@ -1291,6 +1306,10 @@ class EvertAcousticWorld(AcousticWorld):
             roomNode = self.addRoomToScene(room, ignoreObjects)
             roomNode.reparentTo(nodePath)
         
+        for room in house.grounds:
+            roomNode = self.addRoomToScene(room, ignoreObjects)
+            roomNode.reparentTo(nodePath)
+        
         if not ignoreObjects:
             for obj in house.objects:
                 objNode = self.addObjectToScene(obj)
@@ -1345,7 +1364,7 @@ class EvertAcousticWorld(AcousticWorld):
                     continue
                 
                 polygon.setMaterialId(materialId)
-                self.world.addPolygon(polygon, color=Vector3(1.0,1.0,1.0))
+                self.world.addPolygon(polygon, Vector3(1.0,1.0,1.0))
     
         self._updateSources()
         
@@ -1416,7 +1435,8 @@ class EvertAcousticWorld(AcousticWorld):
         for solution in self.solutions:
             solution.update()
         
-        #NOTE: we may need to call frame rendering twice because of double-buffering
-        self._renderAcousticSolutions()
-        self.graphicsEngine.renderFrame()
+        if self.debug:
+            #NOTE: we may need to call frame rendering twice because of double-buffering
+            self._renderAcousticSolutions()
+            self.graphicsEngine.renderFrame()
         

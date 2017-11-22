@@ -128,12 +128,16 @@ class TestFilterBank(unittest.TestCase):
 class TestEvertAcousticWorld(unittest.TestCase):
         
     def testInit(self):
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3)
+        
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3, debug=False)
+        engine.destroy()
+        
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3, debug=True)
         engine.destroy()
             
     def testRenderSimpleCubeRoom(self):
         
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=4, materialAbsorption=False, frequencyDependent=False)
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=4, materialAbsorption=False, frequencyDependent=False, debug=True)
 
         # Define a simple cube (10 x 10 x 10 m) as room geometry
         roomSize = 10.0
@@ -230,7 +234,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
             
     def testRenderHouse(self):
         
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=8, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=8, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=True)
         
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
                                    TEST_SUNCG_DATA_DIR)
@@ -259,7 +263,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
 
     def testRenderRoom(self):
 
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=True, frequencyDependent=True, showCeiling=False)
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=True, frequencyDependent=True, showCeiling=False, debug=True)
         
         # Define the scene geometry
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
@@ -333,7 +337,7 @@ class TestEvertAcousticWorld(unittest.TestCase):
 
     def testRenderRoomPolygons(self):
 
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=1, materialAbsorption=False, frequencyDependent=False, showCeiling=False)
+        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=1, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=True)
         
         # Define the scene geometry
         house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),

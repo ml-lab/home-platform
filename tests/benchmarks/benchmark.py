@@ -37,7 +37,7 @@ class BenchmarkEnvironment(BasicEnvironment):
     def __init__(self, activeEngines=['physics', 'render', 'acoustics']):
     
         # NOTE: set the rendered image size here (this will greatly impact framerate!)
-        super(BenchmarkEnvironment, self).__init__(size=(256, 256))
+        super(BenchmarkEnvironment, self).__init__(size=(120, 90))
     
         self.activeEngines = activeEngines
     

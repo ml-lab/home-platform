@@ -361,6 +361,9 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
         for room in house.rooms:
             self.addRoomToScene(room)
         
+        for room in house.grounds:
+            self.addRoomToScene(room)
+        
         for obj in house.objects:
             self.addObjectToScene(obj)
     
