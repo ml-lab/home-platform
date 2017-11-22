@@ -33,7 +33,9 @@ class HomeEnv(gym.Env):
 
     """
 
-    def __init__(self):
+    def __init__(self, turning_speed=0.1):
+        self.turning_speed = turning_speed  # how fast is the camera moving
+
         self.metadata = {'render.modes': ['human', 'rgb_array']}
 
         # Gym environments have no parameters, so we have to
@@ -87,10 +89,39 @@ class HomeEnv(gym.Env):
 
         return [self.next_house]
 
+    def executeLooking(self, action):
+        new_orientation = self.observation["orientation"]
+        print ("old orientation:", new_orientation)
+
+        if action == 0:
+            pass  # NOOP
+        elif action == 1:
+            new_orientation[0] -= self.turning_speed
+            pass
+        elif action == 2:
+            new_orientation[2] += self.turning_speed
+            pass
+        elif action == 3:
+            new_orientation[0] += self.turning_speed
+            pass
+        elif action == 4:
+            new_orientation[2] -= self.turning_speed
+            pass
+        else:
+            raise Exception("Received unknown 'looking' action: {}. "
+                            "Try an integer in the range from and including 0-4.".format(action))
+
+        print ("new orientation:", new_orientation)
+        self.env.agent.setOrientation(new_orientation)
+
+    def executeMoving(self, action):
+        pass
+
     def _step(self, action):
         assert self.action_space.contains(action)
 
-        # TODO execute action
+        self.executeMoving(action[0])
+        self.executeLooking(action[1])
 
         self.env.step()
 
@@ -119,8 +150,8 @@ class HomeEnv(gym.Env):
         self.env.loadHouse(house)
 
         # TODO move agent to random pos and orientation
-        # self.env.agent.setPosition((42, -39, 1))
-        # self.env.agent.setOrientation((0.0, 0.0, -np.pi / 3))
+        self.env.agent.setPosition((42, -39, 1))
+        self.env.agent.setOrientation((0.0, 0.0, 0.0))
 
         self.env.step()  # need a single step to create rendering in RAM
         self.observation = self.env.getObservation().as_dict()
@@ -141,7 +172,6 @@ class HomeEnv(gym.Env):
 
         self.render_panel = tk.Label(self.render_window, image=imgTk)
         self.render_panel.pack(side="bottom", fill="both", expand="yes")
-        print ("LOADED TK")
 
     def _update_human_render(self):
         img = ImageTk.Image.fromarray(self.observation["image"])
@@ -168,15 +198,20 @@ class HomeEnv(gym.Env):
 
 if __name__ == '__main__':
     import multimodalmaze.gym  # to make the environment available in gym.make()
+    import time
 
     env = gym.make("Home-v0")
     env.reset()
 
     env.render("human")
 
-    for _ in range(20):
-        action = env.action_space.sample()
-        print ("action:", action)
+    for _ in range(5):
+        # action = env.action_space.sample()
+        # print ("action:", action)
 
+        # quit()
+        action = [0, 4]  # looking up test
         obs, rew, done, misc = env.step(action)
+        env.render("human")
+        time.sleep(1)
         # print ("obs:", obs, "rew:", rew, "done:", done, "misc:", misc)
