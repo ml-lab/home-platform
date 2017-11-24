@@ -24,15 +24,32 @@
 # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE 
 # POSSIBILITY OF SUCH DAMAGE.
 
+import os
+import re
+import json
 import csv
 import logging
 import numpy as np
 
+from panda3d.core import NodePath, Loader, LoaderOptions, Filename, TransformState,\
+    LMatrix4f
+
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
-import os
+from multimodalmaze.core import Scene
+from multimodalmaze.utils import mat4ToNumpyArray
 
 logger = logging.getLogger(__name__)
 
+def loadModel(modelPath):
+    loader = Loader.getGlobalPtr()
+    loaderOptions = LoaderOptions()
+    node = loader.loadSync(Filename(modelPath), loaderOptions)
+    if node is not None:
+        nodePath = NodePath(node)
+        nodePath.setTag('model-filename', os.path.abspath(modelPath))
+    else:
+        raise IOError('Could not load model file: %s' % (modelPath))
+    return nodePath
 
 def ignoreVariant(modelId):
     suffix = "_0"
@@ -40,18 +57,21 @@ def ignoreVariant(modelId):
         modelId = modelId[:len(modelId) - len(suffix)]
     return modelId
 
-
 def data_dir():
     """ Get SUNCG data path (must be symlinked to ~/.suncg)
 
     :return: Path to suncg dataset
     """
 
-    path = os.path.join(os.path.abspath(os.path.expanduser('~')), ".suncg")
+    if 'SUNCG_DATA_DIR' in os.environ:
+        path = os.path.abspath(os.environ['SUNCG_DATA_DIR'])
+    else:
+        path = os.path.join(os.path.abspath(os.path.expanduser('~')), ".suncg")
+        
     rooms_exist = os.path.isdir(os.path.join(path, "room"))
     houses_exist = os.path.isdir(os.path.join(path, "house"))
     if not os.path.isdir(path) or not rooms_exist or not houses_exist:
-        raise Exception("Couldn't find the SUNCG dataset in '~/.suncg'. "
+        raise Exception("Couldn't find the SUNCG dataset in '~/.suncg' or with environment variable SUNCG_DATA_DIR. "
                         "Please symlink the dataset there, so that the folders "
                         "'~/.suncg/room', '~/.suncg/house', etc. exist.")
 
@@ -222,3 +242,205 @@ class ObjectVoxelData(object):
             logger.debug('Number of non-empty voxels read from file: %d' % (nrVoxels))
 
         return ObjectVoxelData(voxels, translation, scale)
+
+def reglob(path, exp):
+    # NOTE: adapted from https://stackoverflow.com/questions/13031989/regular-expression-using-in-glob-glob-of-python
+    m = re.compile(exp)
+    res = [f for f in os.listdir(path) if m.search(f)]
+    res = map(lambda x: "%s/%s" % ( path, x, ), res)
+    return res
+
+class SunCgSceneLoader(object):
+    
+    @staticmethod
+    def getHouseJsonPath(base_path, house_id):
+        return os.path.join(
+            base_path,
+            "house",
+            house_id,
+            "house.json")
+    
+    @staticmethod
+    def loadHouseFromJson(houseId, datasetRoot):
+        
+        filename = SunCgSceneLoader.getHouseJsonPath(datasetRoot, houseId)
+        with open(filename) as f:
+            data = json.load(f)
+        assert houseId == data['id']
+        houseId = str(data['id'])
+        
+        # Create new node for house instance
+        houseNp = NodePath('house-' + str(houseId))
+        
+        objectIds = {}
+        for levelId, level in enumerate(data['levels']):
+            logger.debug('Loading Level %s to scene' % (str(levelId)))
+            
+            # Create new node for level instance
+            levelNp = houseNp.attachNewNode('level-' + str(levelId))
+            
+            roomNpByNodeIndex = {}
+            for nodeIndex, node in enumerate(level['nodes']):
+                if not node['valid'] == 1: continue
+                    
+                modelId = str(node['modelId'])
+                    
+                if node['type'] == 'Room':
+                    logger.debug('Loading Room %s to scene' % (modelId))
+                    
+                    # Create new nodes for room instance
+                    roomNp = levelNp.attachNewNode('room-' + str(modelId))
+                    roomLayoutsNp = roomNp.attachNewNode('layouts')
+                    roomObjectsNp = roomNp.attachNewNode('objects')
+                    
+                    # Load models defined for this room 
+                    for roomObjFilename in reglob(os.path.join(datasetRoot, 'room', houseId),
+                                                  modelId + '[a-z].obj'):
+                        
+                        # Convert extension from OBJ + MTL to EGG format
+                        f, _ = os.path.splitext(roomObjFilename)
+                        modelFilename = f + ".egg"
+                        if not os.path.exists(modelFilename):
+                            raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
+                        
+                        # Create new node for object instance
+                        objectNp = NodePath('object-' + str(modelId) + '-0')
+                        objectNp.reparentTo(roomLayoutsNp)
+                        
+                        model = loadModel(modelFilename)
+                        model.setName('model-' + os.path.basename(f))
+                        model.reparentTo(objectNp)
+                        model.hide()
+                    
+                    if 'nodeIndices' in node:
+                        for childNodeIndex in node['nodeIndices']:
+                            roomNpByNodeIndex[childNodeIndex] = roomObjectsNp
+                    
+                elif node['type'] == 'Object':
+                    
+                    logger.debug('Loading Object %s to scene' % (modelId))
+                    
+                    # Instance identification
+                    if modelId in objectIds:
+                        objectIds[modelId] = objectIds[modelId] + 1
+                    else:
+                        objectIds[modelId] = 0
+                    
+                    # Create new node for object instance
+                    objectNp = NodePath('object-' + str(modelId) + '-' + str(objectIds[modelId]))
+                    
+                    # Convert extension from OBJ + MTL to EGG format
+                    objFilename = os.path.join(datasetRoot, 'object', node['modelId'], node['modelId'] + '.obj')
+                    assert os.path.exists(objFilename)
+                    f, _ = os.path.splitext(objFilename)
+                    modelFilename = f + ".egg"
+                    if not os.path.exists(modelFilename):
+                        raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
+                    
+                    model = loadModel(modelFilename)
+                    model.setName('model-' + os.path.basename(f))
+                    model.reparentTo(objectNp)
+                    model.hide()
+                    
+                    # 4x4 column-major transformation matrix from object coordinates to scene coordinates
+                    transform = np.array(node['transform']).reshape((4,4))
+                    
+                    # Transform from Y-UP to Z-UP coordinate systems
+                    #TODO: use Mat4.convertMat(CS_zup_right, CS_yup_right)
+                    yupTransform = np.array([[1, 0, 0, 0],
+                                            [0, 0, -1, 0],
+                                            [0, 1, 0, 0],
+                                            [0, 0, 0, 1]])
+                    
+                    zupTransform = np.array([[1, 0, 0, 0],
+                                            [0, 0, 1, 0],
+                                            [0, -1, 0, 0],
+                                            [0, 0, 0, 1]])
+                    
+                    transform = np.dot(np.dot(yupTransform, transform), zupTransform)
+                    transform = TransformState.makeMat(LMatrix4f(*transform.ravel()))
+                    
+                    # Calculate the center of this object
+                    minBounds, maxBounds = model.getTightBounds()
+                    centerPos = minBounds + (maxBounds - minBounds) / 2.0
+                    
+                    # Add offset transform to make position relative to the center
+                    objectNp.setTransform(transform.compose(TransformState.makePos(centerPos)))
+                    model.setTransform(TransformState.makePos(-centerPos))
+                    
+                    # Get the parent nodepath for the object (room or level)
+                    if nodeIndex in roomNpByNodeIndex:
+                        objectNp.reparentTo(roomNpByNodeIndex[nodeIndex])
+                    else:
+                        objectNp.reparentTo(levelNp)
+                        
+                    # Validation
+                    assert np.allclose(mat4ToNumpyArray(model.getNetTransform().getMat()),
+                                       mat4ToNumpyArray(transform.getMat()), atol=1e-6)
+    
+                    objectNp.setTag('model-id', str(modelId))
+                    objectNp.setTag('level-id', str(levelId))
+                    objectNp.setTag('house-id', str(houseId))
+                
+                elif node['type'] == 'Ground':
+                    
+                    logger.debug('Loading Ground %s to scene' % (modelId))
+                    
+                    # Create new nodes for ground instance
+                    groundNp = levelNp.attachNewNode('ground-' + str(modelId))
+                    groundLayoutsNp = groundNp.attachNewNode('layouts')
+                    
+                    # Load model defined for this ground
+                    for groundObjFilename in reglob(os.path.join(datasetRoot, 'room', houseId),
+                                                  modelId + '[a-z].obj'):
+                    
+                        # Convert extension from OBJ + MTL to EGG format
+                        f, _ = os.path.splitext(groundObjFilename)
+                        modelFilename = f + ".egg"
+                        if not os.path.exists(modelFilename):
+                            raise Exception('The SUNCG dataset object models need to be convert to Panda3D EGG format!')
+                
+                        objectNp = NodePath('object-' + str(modelId) + '-0')
+                        objectNp.reparentTo(groundLayoutsNp)
+                
+                        model = loadModel(modelFilename)
+                        model.setName('model-' + os.path.basename(f))
+                        model.reparentTo(objectNp)
+                        model.hide()
+                
+                else:
+                    raise Exception('Unsupported node type: %s' % (node['type']))
+                
+                
+        scene = Scene()
+        houseNp.reparentTo(scene.scene)
+                
+        # Recenter objects in rooms
+        for room in scene.scene.findAllMatches('**/room*'):
+         
+            # Calculate the center of this room
+            minBounds, maxBounds = room.getTightBounds()
+            centerPos = minBounds + (maxBounds - minBounds) / 2.0
+              
+            # Add offset transform to room node
+            room.setTransform(TransformState.makePos(centerPos))
+              
+            # Add recentering transform to all children nodes
+            for childNp in room.getChildren():
+                childNp.setTransform(TransformState.makePos(-centerPos))
+         
+        # Recenter objects in grounds
+        for ground in scene.scene.findAllMatches('**/ground*'):
+         
+            # Calculate the center of this ground
+            minBounds, maxBounds = ground.getTightBounds()
+            centerPos = minBounds + (maxBounds - minBounds) / 2.0
+              
+            # Add offset transform to ground node
+            ground.setTransform(TransformState.makePos(centerPos))
+              
+            # Add recentering transform to all children nodes
+            for childNp in ground.getChildren():
+                childNp.setTransform(TransformState.makePos(-centerPos))
+                
+        return scene

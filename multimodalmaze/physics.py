@@ -28,122 +28,23 @@ import os
 import logging
 import numpy as np
 
-from panda3d.core import Vec3, Mat4, LoaderOptions, Filename, NodePath, Loader, ClockObject, BitMask32, TransformState, \
-    LVector3f
+from panda3d.core import Vec3, NodePath, BitMask32, TransformState, LVecBase3f
 
-from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, \
-    BulletTriangleMeshShape, \
-    BulletDebugNode, BulletCapsuleShape, BulletConvexHullShape, BulletBodyNode
+from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
+                            BulletDebugNode, BulletCapsuleShape, BulletConvexHullShape
 
+from multimodalmaze.core import World
 from multimodalmaze.suncg import ObjectVoxelData, ModelCategoryMapping
+from multimodalmaze.utils import mat4ToNumpyArray
 
 logger = logging.getLogger(__name__)
-
-
-class PhysicObject(object):
-    def getTransform(self):
-        return NotImplementedError()
-
-    def setTransform(self):
-        return NotImplementedError()
-
-    def setLinearVelocity(self, velocity):
-        return NotImplementedError()
-
-    def setAngularVelocity(self, velocity):
-        return NotImplementedError()
-
-    def isCollision(self):
-        return NotImplementedError()
-
-
-class PhysicWorld(object):
-    def addAgentToScene(self, agent):
-        return NotImplementedError()
-
-    def addObjectToScene(self, obj):
-        return NotImplementedError()
-
-    def addRoomToScene(self, room):
-        return NotImplementedError()
-
-    def addHouseToScene(self, house):
-        return NotImplementedError()
-
-    def step(self, time):
-        return NotImplementedError()
-
-
-class Panda3dBulletPhysicObject(PhysicObject):
-    def __init__(self, world, nodePath, recenterTransform=None):
-        self.world = world
-        self.nodePath = nodePath
-
-        if recenterTransform is None:
-            recenterTransform = TransformState.makeIdentity()
-        self.recenterTransform = recenterTransform
-
-    def getTransform(self):
-        transform = self.nodePath.node().getTransform()
-        mat = transform.compose(TransformState.makePos(-self.recenterTransform.getPos())).getMat()
-        return np.array([[mat[0][0], mat[0][1], mat[0][2], mat[0][3]],
-                         [mat[1][0], mat[1][1], mat[1][2], mat[1][3]],
-                         [mat[2][0], mat[2][1], mat[2][2], mat[2][3]],
-                         [mat[3][0], mat[3][1], mat[3][2], mat[3][3]]])
-
-    def getRecenterPosition(self):
-        position = self.recenterTransform.getPos()
-        return np.array([position.x, position.y, position.z])
-
-    def setTransform(self, transform):
-        mat = Mat4(*transform.ravel())
-        self.nodePath.setTransform(TransformState.makeMat(mat).compose(self.recenterTransform))
-
-    def setLinearVelocity(self, velocity):
-
-        # Apply the local transform to the velocity
-        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
-        mat = self.nodePath.node().getTransform().getMat()
-        rotMat = np.array([[mat[0][0], mat[0][1], mat[0][2]],
-                           [mat[1][0], mat[1][1], mat[1][2]],
-                           [mat[2][0], mat[2][1], mat[2][2]]])
-        velocity = np.dot(velocity, rotMat)
-
-        velocity = Vec3(velocity[0], velocity[1], velocity[2])
-        self.nodePath.node().setLinearVelocity(velocity)
-
-    def applyImpulse(self, impulse):
-        proper_vector = LVector3f(impulse[0], impulse[1], impulse[2])
-        self.nodePath.node().applyCentralImpulse(proper_vector)
-
-    def setAngularVelocity(self, velocity):
-        velocity = Vec3(velocity[0], velocity[1], velocity[2])
-        self.nodePath.node().setAngularVelocity(velocity)
-
-    def isCollision(self):
-        isCollisionDetected = False
-
-        node = self.nodePath.node()
-        if isinstance(node, BulletBodyNode):
-            result = self.world.contactTest(node)
-            if result.getNumContacts() > 0:
-                isCollisionDetected = True
-        else:
-            for nodePath in self.nodePath.findAllMatches('**/+BulletBodyNode'):
-                node = nodePath.node()
-                if isinstance(node, BulletBodyNode):
-                    result = self.world.contactTest(node)
-                    if result.getNumContacts() > 0:
-                        isCollisionDetected = True
-
-        return isCollisionDetected
-
-
-def getCollisionShapeFromModel(model, mode='box'):
-    # NOTE: make sure the position is relative to the center of the object
+                
+def getCollisionShapeFromModel(model, mode='box', defaultCentered=False):
+    
+    #NOTE: make sure the position is relative to the center of the object
     minBounds, maxBounds = model.getTightBounds()
     offset = minBounds + (maxBounds - minBounds) / 2.0
-
+    
     transform = TransformState.makeIdentity()
     if mode == 'mesh':
         # Use exact triangle mesh approximation
@@ -155,15 +56,17 @@ def getCollisionShapeFromModel(model, mode='box'):
                 geom = geomNode.getGeom(n)
                 mesh.addGeom(geom)
         shape = BulletTriangleMeshShape(mesh, dynamic=False)
-
+        transform = model.getTransform()
+        
     elif mode == "sphere":
         minBounds, maxBounds = model.getTightBounds()
         dims = maxBounds - minBounds
         radius = np.sqrt(np.square(dims[0]) + np.square(dims[1])) / 2.0
         height = dims[2]
         shape = BulletCapsuleShape(radius, 2 * radius)
-        transform = TransformState.makePos(offset)
-
+        if not defaultCentered:
+            transform = TransformState.makePos(offset)
+        
     elif mode == "hull":
         shape = BulletConvexHullShape()
         geomNodes = model.findAllMatches('**/+GeomNode')
@@ -172,29 +75,31 @@ def getCollisionShapeFromModel(model, mode='box'):
             for n in range(geomNode.getNumGeoms()):
                 geom = geomNode.getGeom(n)
                 shape.addGeom(geom)
-
+        
     elif mode == 'box':
         # Bounding box approximation
         minBounds, maxBounds = model.getTightBounds()
         dims = maxBounds - minBounds
-        shape = BulletBoxShape(Vec3(dims.x / 2, dims.y / 2, dims.z / 2))
-        transform = TransformState.makePos(offset)
-
+        shape = BulletBoxShape(Vec3(dims.x / 2, dims.y / 2, dims.z  /2))
+        if not defaultCentered:
+            transform = TransformState.makePos(offset)
+        
     elif mode == 'capsule':
         minBounds, maxBounds = model.getTightBounds()
         dims = maxBounds - minBounds
         radius = np.sqrt(np.square(dims[0]) + np.square(dims[1])) / 2.0
         height = dims[2]
         shape = BulletCapsuleShape(radius, height - 2 * radius)
-        transform = TransformState.makePos(offset)
-
+        if not defaultCentered:
+            transform = TransformState.makePos(offset)
+        
     else:
         raise Exception('Unknown mode type for physic object collision shape: %s' % (mode))
-
+    
     return shape, transform
+                
+class Panda3dBulletPhysics(World):
 
-
-class Panda3dBulletPhysicWorld(PhysicWorld):
     # NOTE: the model ids of objects that correspond to opened doors. They will be ignored for collisions.
     openedDoorModelIds = [
         '122', '133', '214', '246', '247', '361', '73', '756', '757', '758', '759', '760',
@@ -211,221 +116,262 @@ class Panda3dBulletPhysicWorld(PhysicWorld):
 
     # For more coefficients, see table: https://www.thoughtspike.com/friction-coefficients-for-bullet-physics/
     defaultMaterialFriction = 0.7
-
+    
     defaultMaterialRestitution = 0.5
 
-    def __init__(self, suncgDatasetRoot=None, debug=False):
+    def __init__(self, scene, suncgDatasetRoot=None, debug=False, objectMode='box',
+                       agentRadius=0.1, agentHeight=1.6, agentMass=60.0, agentMode='capsule'):
 
-        self.suncgDatasetRoot = suncgDatasetRoot
+        super(Panda3dBulletPhysics, self).__init__()
+
+        self.__dict__.update(scene=scene, suncgDatasetRoot=suncgDatasetRoot, debug=debug, objectMode=objectMode,
+                             agentRadius=agentRadius, agentHeight=agentHeight, agentMass=agentMass, agentMode=agentMode)
+        
         if suncgDatasetRoot is not None:
-            self.modelCatMapping = ModelCategoryMapping(
-                os.path.join(suncgDatasetRoot, "metadata", "ModelCategoryMapping.csv"))
+            self.modelCatMapping = ModelCategoryMapping(os.path.join(suncgDatasetRoot, "metadata", "ModelCategoryMapping.csv"))
         else:
             self.modelCatMapping = None
 
-        self.physicWorld = BulletWorld()
-        self.physicWorld.setGravity(Vec3(0, 0, -9.81))
-        self.globalClock = ClockObject.getGlobalClock()
-
-        self.render = NodePath('physic-render')
-
-        self.agent_physics_node = None
-
+        self.bulletWorld = BulletWorld()
+        self.bulletWorld.setGravity(Vec3(0, 0, -9.81))
+        
         if debug:
             debugNode = BulletDebugNode('physic-debug')
             debugNode.showWireframe(True)
             debugNode.showConstraints(False)
-            debugNode.showBoundingBoxes(False)
+            debugNode.showBoundingBoxes(True)
             debugNode.showNormals(False)
-            self.debugNodePath = self.render.attachNewNode(debugNode)
+            self.debugNodePath = self.scene.scene.attachNewNode(debugNode)
             self.debugNodePath.show()
-            self.physicWorld.setDebugNode(debugNode)
+            self.bulletWorld.setDebugNode(debugNode)
         else:
             self.debugNodePath = None
-
-    def _loadModel(self, modelPath):
-        loader = Loader.getGlobalPtr()
-        loaderOptions = LoaderOptions()
-        node = loader.loadSync(Filename(modelPath), loaderOptions)
-        if node is not None:
-            nodePath = NodePath(node)
-        else:
-            raise IOError('Could not load model file: %s' % (modelPath))
-        return nodePath
-
-    def addAgentToScene(self, agent, radius=0.1, height=1.6, mass=60.0, mode='capsule'):
-
-        transform = TransformState.makeIdentity()
-        if agent.modelFilename is not None:
-
-            # Load model from file
-            model = self._loadModel(agent.modelFilename)
-            shape, transform = getCollisionShapeFromModel(model, mode)
-        elif mode == 'capsule':
-            shape = BulletCapsuleShape(radius, height - 2 * radius)
-        elif mode == 'sphere':
-            shape = BulletCapsuleShape(radius, 2 * radius)
-
-        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
-        node = BulletRigidBodyNode('agent-' + str(agent.instanceId))
-        node.setMass(mass)
-        node.setStatic(False)
-        node.setFriction(self.defaultMaterialFriction)
-        node.setRestitution(self.defaultMaterialRestitution)
-        node.addShape(shape)
-
-        # Constrain the agent to have fixed position on the Z-axis
-        node.setLinearFactor(Vec3(1.0, 1.0, 0.0))
-
-        # Constrain the agent to have rotation around the Z-axis only
-        node.setAngularFactor(Vec3(0.0, 0.0, 1.0))
-
-        node.setIntoCollideMask(BitMask32.allOn())
-        node.setDeactivationEnabled(False)
-
-        self.agent_physics_node = node
-
-        self.physicWorld.attach(node)
-        nodePath = self.render.attachNewNode(node)
-
-        instance = Panda3dBulletPhysicObject(self.physicWorld, nodePath)
-        instance.recenterTransform = transform
-        agent.setPhysicObject(instance)
-        agent.assertConsistency()
-
-    def addObjectToScene(self, obj, mode='box'):
-
-        # Load model from file
-        model = self._loadModel(obj.modelFilename)
-        shape, transform = getCollisionShapeFromModel(model, mode)
-
-        # XXX: we could create BulletGhostNode instance for non-collidable objects, but we would need to filter out the collisions later on
-        if not obj.modelId in self.openedDoorModelIds:
-            node = BulletRigidBodyNode('object-' + str(obj.instanceId))
-
-            if self.suncgDatasetRoot is not None:
-
-                # Check if it is a movable object
-                category = self.modelCatMapping.getCoarseGrainedCategoryForModelId(obj.modelId)
-                if category in self.movableObjectCategories:
-                    # Estimate mass of object based on volumetric data and default material density
-                    objVoxFilename = os.path.join(self.suncgDatasetRoot, 'object_vox', 'object_vox_data',
-                                                  str(obj.modelId), str(obj.modelId) + '.binvox')
-                    voxelData = ObjectVoxelData.fromFile(objVoxFilename)
-                    mass = Panda3dBulletPhysicWorld.defaultDensity * voxelData.getFilledVolume()
-                    node.setMass(mass)
-                else:
-                    node.setMass(0.0)
-                    node.setStatic(True)
-            else:
-                node.setMass(0.0)
-                node.setStatic(True)
-
-            node.setFriction(self.defaultMaterialFriction)
-            node.setRestitution(self.defaultMaterialRestitution)
-            node.addShape(shape)
-            node.setIntoCollideMask(BitMask32.allOn())
-            node.setDeactivationEnabled(False)
-
-            model.detachNode()
-            self.physicWorld.attach(node)
-            nodePath = self.render.attachNewNode(node)
-
-            instance = Panda3dBulletPhysicObject(self.physicWorld, nodePath)
-            instance.recenterTransform = transform
-            obj.setPhysicObject(instance)
-
-        else:
-            logger.debug('Object %s ignored from physics' % (obj.instanceId))
-
-        obj.assertConsistency()
-
-    def addRoomToScene(self, room):
-
-        roomNodePath = self.render.attachNewNode('room-' + str(room.instanceId))
-        for modelFilename in room.modelFilenames:
-            partId = os.path.splitext(os.path.basename(modelFilename))[0]
-            model = self._loadModel(modelFilename)
-
-            shape, _ = getCollisionShapeFromModel(model, mode='mesh')
-            node = BulletRigidBodyNode('room-' + str(room.instanceId) + '-' + partId)
+            
+        self._initLayoutModels()
+        self._initAgents()
+        self._initObjects()
+    
+        self.scene.worlds['physics'] = self
+    
+    def destroy(self):
+        # Nothing to do
+        pass
+    
+    def _initLayoutModels(self):
+        
+        # Load layout objects as meshes
+        for model in self.scene.scene.findAllMatches('**/layouts/object*/model*'):
+            
+            shape, transform = getCollisionShapeFromModel(model, mode='mesh', defaultCentered=False)
+            
+            node = BulletRigidBodyNode('physics')
             node.setMass(0.0)
             node.setFriction(self.defaultMaterialFriction)
             node.setRestitution(self.defaultMaterialRestitution)
             node.setStatic(True)
             node.addShape(shape)
-            node.setDeactivationEnabled(False)
+            node.setDeactivationEnabled(True)
             node.setIntoCollideMask(BitMask32.allOn())
+            self.bulletWorld.attach(node)
+            
+            # Attach the physic-related node to the scene graph
+            physicsNp = model.getParent().attachNewNode(node)
+            physicsNp.setTransform(transform)
+            
+            if node.isStatic():
+                model.getParent().setTag('physics-mode', 'static')
+            else:
+                model.getParent().setTag('physics-mode', 'dynamic')
+            
+            # Reparent render and acoustics nodes (if any) below the new physic node
+            #XXX: should be less error prone to just reparent all children (except the hidden model)
+            renderNp = model.getParent().find('**/render')
+            if not renderNp.isEmpty():
+                renderNp.reparentTo(physicsNp)
+            acousticsNp = model.getParent().find('**/acoustics')
+            if not acousticsNp.isEmpty():
+                acousticsNp.reparentTo(physicsNp)
+    
+            # NOTE: we need this to update the transform state of the internal bullet node
+            physicsNp.node().setTransformDirty()
+    
+            # Validation
+            assert np.allclose(mat4ToNumpyArray(physicsNp.getNetTransform().getMat()),
+                               mat4ToNumpyArray(model.getNetTransform().getMat()), atol=1e-6)
+    
+    def _initAgents(self):
+    
+        # Load agents
+        for agent in self.scene.scene.findAllMatches('**/agents/agent*'):
+            
+            transform = TransformState.makeIdentity()
+            if self.agentMode == 'capsule':
+                shape = BulletCapsuleShape(self.agentRadius, self.agentHeight - 2*self.agentRadius)
+            elif self.agentMode == 'sphere':
+                shape = BulletCapsuleShape(self.agentRadius, 2*self.agentRadius)
+                
+            # XXX: use BulletCharacterControllerNode class, which already handles local transform?
+            node = BulletRigidBodyNode('physics')
+            node.setMass(self.agentMass)
+            node.setStatic(False)
+            node.setFriction(self.defaultMaterialFriction)
+            node.setRestitution(self.defaultMaterialRestitution)
+            node.addShape(shape)
+            self.bulletWorld.attach(node)
+            
+            # Constrain the agent to have fixed position on the Z-axis
+            node.setLinearFactor(Vec3(1.0, 1.0, 0.0))
+    
+            # Constrain the agent to have rotation around the Z-axis only
+            node.setAngularFactor(Vec3(0.0, 0.0, 1.0))
+            
+            node.setIntoCollideMask(BitMask32.allOn())
+            node.setDeactivationEnabled(True)
+            
+            if node.isStatic():
+                agent.setTag('physics-mode', 'static')
+            else:
+                agent.setTag('physics-mode', 'dynamic')
+            
+            # Attach the physic-related node to the scene graph
+            physicsNp = NodePath(node)
+            physicsNp.setTransform(transform)
+            
+            # Reparent all child nodes below the new physic node
+            for child in agent.getChildren():
+                child.reparentTo(physicsNp)
+            physicsNp.reparentTo(agent)
+            
+            # NOTE: we need this to update the transform state of the internal bullet node
+            physicsNp.node().setTransformDirty()                
+            
+            # Validation
+            assert np.allclose(mat4ToNumpyArray(physicsNp.getNetTransform().getMat()),
+                               mat4ToNumpyArray(agent.getNetTransform().getMat()), atol=1e-6)
+            
+    def _initObjects(self):
+    
+        # Load objects
+        for model in self.scene.scene.findAllMatches('**/objects/object*/model*'):
+            modelId = model.getParent().getTag('model-id')
+            
+            # XXX: we could create BulletGhostNode instance for non-collidable objects, but we would need to filter out the collisions later on
+            if not modelId in self.openedDoorModelIds:
+                
+                shape, transform = getCollisionShapeFromModel(model, self.objectMode, defaultCentered=True)
+                
+                node = BulletRigidBodyNode('physics')
+                node.addShape(shape)
+                node.setFriction(self.defaultMaterialFriction)
+                node.setRestitution(self.defaultMaterialRestitution)
+                node.setIntoCollideMask(BitMask32.allOn())
+                node.setDeactivationEnabled(True)
+                self.bulletWorld.attach(node)
+                
+                if self.suncgDatasetRoot is not None:
+                    
+                    # Check if it is a movable object
+                    category = self.modelCatMapping.getCoarseGrainedCategoryForModelId(modelId)
+                    if category in self.movableObjectCategories:
+                        # Estimate mass of object based on volumetric data and default material density
+                        objVoxFilename = os.path.join(self.suncgDatasetRoot, 'object_vox', 'object_vox_data', modelId, modelId + '.binvox')
+                        voxelData = ObjectVoxelData.fromFile(objVoxFilename)
+                        mass = Panda3dBulletPhysics.defaultDensity * voxelData.getFilledVolume()
+                        node.setMass(mass)
+                    else:
+                        node.setMass(0.0)
+                        node.setStatic(True)
+                else:
+                    node.setMass(0.0)
+                    node.setStatic(True)
+                
+                if node.isStatic():
+                    model.getParent().setTag('physics-mode', 'static')
+                else:
+                    model.getParent().setTag('physics-mode', 'dynamic')
+                
+                # Attach the physic-related node to the scene graph
+                physicsNp = model.getParent().attachNewNode(node)
+                physicsNp.setTransform(transform)
+                
+                # Reparent render and acoustics nodes (if any) below the new physic node
+                #XXX: should be less error prone to just reparent all children (except the hidden model)
+                renderNp = model.getParent().find('**/render')
+                if not renderNp.isEmpty():
+                    renderNp.reparentTo(physicsNp)
+                acousticsNp = model.getParent().find('**/acoustics')
+                if not acousticsNp.isEmpty():
+                    acousticsNp.reparentTo(physicsNp)
+                
+                # NOTE: we need this to update the transform state of the internal bullet node
+                physicsNp.node().setTransformDirty()
+                
+                # Validation
+                assert np.allclose(mat4ToNumpyArray(physicsNp.getNetTransform().getMat()),
+                                   mat4ToNumpyArray(model.getParent().getNetTransform().getMat()), atol=1e-6)
+                
+            else:
+                logger.debug('Object %s ignored from physics' % (modelId))
 
-            self.physicWorld.attach(node)
-            roomNodePath.attachNewNode(node)
-            model.detachNode()
+    def step(self, dt):
+        self.bulletWorld.doPhysics(dt)
 
-        instance = Panda3dBulletPhysicObject(self.physicWorld, roomNodePath)
-        room.setPhysicObject(instance)
-
-        for obj in room.objects:
-            self.addObjectToScene(obj)
-
-    def addHouseToScene(self, house):
-
-        for room in house.rooms:
-            self.addRoomToScene(room)
-
-        for room in house.grounds:
-            self.addRoomToScene(room)
-
-        for obj in house.objects:
-            self.addObjectToScene(obj)
-
-    def step(self):
-
-        # XXX: if we only use bullet for collision detection among static objects, we may not even need to simulate physics  
-
-        # Update physics from global clock
-        dt = self.globalClock.getDt()
-        self.physicWorld.doPhysics(dt)
+    def isCollision(self, root):
+        isCollisionDetected = False
+        if isinstance(root.node(), BulletRigidBodyNode):
+            result = self.bulletWorld.contactTest(root.node())
+            if result.getNumContacts() > 0:
+                isCollisionDetected = True
+        else:
+            for nodePath in root.findAllMatches('**/+BulletBodyNode'):
+                result = self.bulletWorld.contactTest(nodePath.node())
+                if result.getNumContacts() > 0:
+                    isCollisionDetected = True
+        return isCollisionDetected
 
     def calculate2dNavigationMap(self, agent, z=0.1, precision=0.1, yup=True):
-
+    
+        agentRbNp = agent.find('**/+BulletRigidBodyNode')
+    
         # Calculate the bounding box of the scene
         bounds = []
-        for node in self.physicWorld.getRigidBodies():
-            # Filter ground planes and agents
-            if not 'agent' in node.getName():
-                # NOTE: the bounding sphere doesn't seem to take into account the transform, so apply it manually (translation only)
-                bsphere = node.getShapeBounds()
-                center = node.getTransform().getPos()
-                bounds.extend([center + bsphere.getMin(), center + bsphere.getMax()])
-        minBounds, maxBounds = np.min(bounds, axis=0), np.max(bounds, axis=0)
+        for nodePath in self.scene.scene.findAllMatches('**/object*/+BulletRigidBodyNode'):
+            node = nodePath.node()
 
+            #NOTE: the bounding sphere doesn't seem to take into account the transform, so apply it manually (translation only)
+            bsphere = node.getShapeBounds()
+            center = nodePath.getNetTransform().getPos()
+            bounds.extend([center + bsphere.getMin(), center + bsphere.getMax()])
+                
+        minBounds, maxBounds = np.min(bounds, axis=0), np.max(bounds, axis=0)
+        
         # Using the X and Y dimensions of the bounding box, discretize the 2D plan into a uniform grid with given precision
         X = np.arange(minBounds[0], maxBounds[0], step=precision)
         Y = np.arange(minBounds[1], maxBounds[1], step=precision)
         nbTotalCells = len(X) * len(Y)
         threshold10Perc = int(nbTotalCells / 10)
-
+      
         # XXX: the simulation needs to be run a little before moving the agent, not sure why
-        self.physicWorld.doPhysics(0.1)
-
+        self.bulletWorld.doPhysics(0.1)
+      
         # Sweep the position of the agent across the grid, checking if collision/contacts occurs with objects or walls in the scene.
         occupancyMap = np.zeros((len(X), len(Y)))
         occupancyMapCoord = np.zeros((len(X), len(Y), 2))
         n = 0
-        for i, x in enumerate(X):
-            for j, y in enumerate(Y):
-                agent.setPosition([x, y, z])
-
-                if agent.isCollision():
-                    occupancyMap[i, j] = 1.0
-
-                occupancyMapCoord[i, j, 0] = x
-                occupancyMapCoord[i, j, 1] = y
-
+        for i,x in enumerate(X):
+            for j,y in enumerate(Y):
+                agentRbNp.setPos(LVecBase3f(x, y, z))
+                
+                if self.isCollision(agentRbNp):
+                    occupancyMap[i,j] = 1.0
+        
+                occupancyMapCoord[i,j,0] = x
+                occupancyMapCoord[i,j,1] = y
+                
                 n += 1
                 if n % threshold10Perc == 0:
                     logger.debug('Collision test no.%d (out of %d total)' % (n, nbTotalCells))
-
+        
         if yup:
             # Convert to image format (y,x)
             occupancyMap = np.flipud(occupancyMap.T)

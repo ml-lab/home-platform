@@ -28,11 +28,12 @@ import heapq
 import logging
 import numpy as np
 
-from multimodalmaze.core import Agent
+from multimodalmaze.suncg import SunCgSceneLoader
+from multimodalmaze.rendering import Panda3dRenderer
+from multimodalmaze.physics import Panda3dBulletPhysics
 
-from rendering import Panda3dRenderWorld
-from physics import Panda3dBulletPhysicWorld
-from multimodalmaze.acoustics import EvertAcousticWorld
+from panda3d.core import ClockObject, LVector3f
+from multimodalmaze.utils import vec3ToNumpyArray
 
 logger = logging.getLogger(__name__)
 
@@ -89,39 +90,43 @@ class Observation(object):
 
 
 class BasicEnvironment(object):
-    def __init__(self, suncgDatasetRoot=None, size=(256, 256), debug=False, depth=False):
+    def __init__(self, houseId, suncgDatasetRoot=None, size=(256, 256), debug=False, depth=False, realtime=False, dt=0.1):
 
-        # Create default agent
-        self.agent = Agent('agent')
+        self.__dict__.update(houseId=houseId, suncgDatasetRoot=suncgDatasetRoot, size=size,
+                             debug=debug, depth=depth, realtime=realtime, dt=dt)
 
-        self.physicWorld = Panda3dBulletPhysicWorld(suncgDatasetRoot)
-        self.physicWorld.addAgentToScene(self.agent, radius=0.1, height=1.6, mass=60.0, mode='capsule')
+        self.scene = SunCgSceneLoader.loadHouseFromJson(houseId, suncgDatasetRoot)
 
-        self.renderWorld = Panda3dRenderWorld(size, shadowing=False, showCeiling=False, depth=depth)
-        self.renderWorld.addDefaultLighting()
-        self.renderWorld.addAgentToScene(self.agent)
+        self.physicWorld = Panda3dBulletPhysics(self.scene, suncgDatasetRoot, debug=debug, objectMode='box', 
+                                                agentRadius=0.1, agentHeight=1.6, agentMass=60.0, agentMode='capsule')
 
-        self.acousticWorld = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=debug)
-        self.acousticWorld.addAgentToScene(self.agent)
+        self.renderWorld = Panda3dRenderer(self.scene, size, shadowing=False, showCeiling=False, depth=depth)
+
+        self.clock = ClockObject.getGlobalClock()
         
         self.worlds = {
             "physics": self.physicWorld,
             "render": self.renderWorld,
-            "acoustics": self.acousticWorld,
         }
+
+        self.agent = self.scene.agents[0]
+        self.agentRbNp = self.agent.find('**/+BulletRigidBodyNode')
 
         self.labeledNavMap = None
         self.occupancyMapCoord = None
 
+    def setAgentPosition(self, position):
+        self.agentRbNp.setPos(LVector3f(position[0], position[1], position[2]))
+        
+    def setAgentOrientation(self, orientation):
+        self.agentRbNp.setHpr(LVector3f(orientation[0], orientation[1], orientation[2]))
+        
+    def applyImpulseToAgent(self, impulse):
+        self.agentRbNp.node().applyCentralImpulse(LVector3f(impulse[0], impulse[1], impulse[2]))
+        
     def destroy(self):
         if self.renderWorld is not None:
             self.renderWorld.destroy()
-
-    def loadHouse(self, house):
-        # FIXME: find out why the acoustic engine needs to be last, otherwise the positions are not synchronized
-        self.worlds["physics"].addHouseToScene(house)
-        self.worlds["render"].addHouseToScene(house)
-        self.worlds["acoustics"].addHouseToScene(house)
 
     def generateOccupancyMap(self, minRegionArea=10.0, z=1.0, precision=0.1):
 
@@ -192,15 +197,21 @@ class BasicEnvironment(object):
         return occupancyMap, self.occupancyMapCoord, np.array(positions)
 
     def getObservation(self):
-        position = self.agent.getPosition()
-        orientation = self.agent.getOrientation()
-        image = self.renderWorld.getRgbImage()
-        collision = self.agent.isCollision()
+        
+        position = vec3ToNumpyArray(self.agentRbNp.getNetTransform().getPos())
+        orientation = vec3ToNumpyArray(self.agentRbNp.getNetTransform().getHpr())
+        image = self.renderWorld.getRgbImages()['agent-0']
+        collision = self.physicWorld.isCollision(self.agentRbNp)
 
         return Observation(position, orientation, image, collision)
 
     def step(self):
+        
+        if self.realtime:
+            dt = self.clock.getDt()
+        else:
+            dt = self.dt
+        
         # NOTE: we should always update the physics first
-        self.worlds["physics"].step()
-        self.worlds["render"].step()
-        self.worlds["acoustics"].step()
+        self.worlds["physics"].step(dt)
+        self.worlds["render"].step(dt)

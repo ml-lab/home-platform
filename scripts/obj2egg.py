@@ -74,7 +74,18 @@ class ObjMaterial:
         if not self.isTextured():
             return None
         m = EggTexture(self.name + "_diffuse", self.get("map_Kd"))
-        m.setFormat(EggTexture.FRgb)
+        
+        # Check if texture supports transparency based on extension name
+        _, ext = os.path.splitext(self.attrib['map_Kd'])
+        if ext.lower() == '.png':
+            m.setFormat(EggTexture.FRgba)
+        elif ext.lower() in ['.jpg', '.jpeg']:
+            # NOTE: JPG format does not support transparency
+            m.setFormat(EggTexture.FRgb)
+        else:
+            print 'Object has texture with extension: ', ext
+            m.setFormat(EggTexture.FRgb)
+        
         m.setMagfilter(EggTexture.FTLinearMipmapLinear)
         m.setMinfilter(EggTexture.FTLinearMipmapLinear)
         m.setWrapU(EggTexture.WMRepeat)
@@ -580,10 +591,8 @@ def main(argv=None):
                 egg.setCoordinateSystem(coordSys)
                     
             egg.removeUnusedVertices(GlobPattern(""))
-            if True:
-                egg.triangulatePolygons(EggData.TConvex & EggData.TPolygon)
-            if True:
-                egg.recomputePolygonNormals()
+            #egg.triangulatePolygons(EggData.TConvex & EggData.TPolygon)
+            #egg.recomputePolygonNormals()
             egg.writeEgg(Filename(outfile))
             if options.show:
                 os.system("pview " + outfile)

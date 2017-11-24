@@ -14,7 +14,7 @@ Main requirements:
 To install dependencies on Ubuntu operating systems:
 ```
 sudo apt-get install python-pip python-dev build-essential libsndfile1
-sudo pip2 install --upgrade pip numpy scipy matplotlib panda3d pysoundfile nose coverage
+sudo pip2 install --upgrade pip numpy scipy matplotlib panda3d pysoundfile resampy nose coverage
 ```
 (Packages `nose` and `coverage` are for tests only and can be omitted)
 

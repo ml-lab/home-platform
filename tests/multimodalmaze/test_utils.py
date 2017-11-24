@@ -25,6 +25,7 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import time
 import logging
 import numpy as np
 import unittest
@@ -32,44 +33,57 @@ import unittest
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation, ObjectVoxelData,\
-    SunCgSceneLoader
+from panda3d.core import LMatrix4f, LMatrix4, LVector3
 
-class TestModelCategoryMapping(unittest.TestCase):
-
-    def testInit(self):
-        _ = ModelCategoryMapping(os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "ModelCategoryMapping.csv"))
-
-class TestModelInformation(unittest.TestCase):
-
-    def testInit(self):
-        _ = ModelInformation(os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "models.csv"))
+from multimodalmaze.suncg import SunCgSceneLoader
+from multimodalmaze.utils import Viewer, mat4ToNumpyArray, vec3ToNumpyArray
     
-    def testGetModelInfo(self):
-        info = ModelInformation(os.path.join(TEST_SUNCG_DATA_DIR, "metadata", "models.csv"))
-        _ = info.getModelInfo('261')
-        
-class TestObjectVoxelData(unittest.TestCase):
+class TestViewer(unittest.TestCase):
     
-    def testGetFilledVolume(self):
+    def testStep(self):
         
-        for modelId in ['83', '81', '561', '441', '317']:
-            voxelData = ObjectVoxelData.fromFile(os.path.join(TEST_SUNCG_DATA_DIR, "object_vox", "object_vox_data", modelId, modelId + ".binvox"))
-            volume = voxelData.getFilledVolume()
-            self.assertTrue(np.array_equal(voxelData.voxels.shape, [128,128,128]))
-            self.assertTrue(volume > 0)
+        try:
+            scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
+
+            #NOTE: show initial models loaded into the scene
+            for model in scene.scene.findAllMatches('**/+ModelNode'):
+                model.show()
+    
+            viewer = Viewer(scene, shadowing=False)
+            
+            # Configure the camera
+            #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
+            mat = np.array([0.999992, 0.00394238, 0, 0,
+                            -0.00295702, 0.750104, -0.661314, 0,
+                            -0.00260737, 0.661308, 0.75011, 0,
+                            43.621, -55.7499, 12.9722, 1])
+            mat = LMatrix4f(*mat.ravel())
+            viewer.cam.setMat(mat)
+            
+            for _ in range(20):
+                viewer.step()
+            time.sleep(1.0)
         
-class TestSunCgSceneLoader(unittest.TestCase):
+        finally:
+            viewer.destroy()
+            viewer.graphicsEngine.removeAllWindows()
+
+class TestFunctions(unittest.TestCase):
+    
+    def testMat4ToNumpyArray(self):
+        xr = np.random.random((4,4))
+        mat = LMatrix4(*xr.ravel())
+        x = mat4ToNumpyArray(mat)
+        self.assertTrue(np.allclose(x, xr, atol=1e-6))
         
-    def testLoadHouseFromJson(self):
-        scene = SunCgSceneLoader.loadHouseFromJson('0004d52d1aeeb8ae6de39d6bd993e992', TEST_SUNCG_DATA_DIR)
-        self.assertTrue(scene.getTotalNbHouses() == 1)
-        self.assertTrue(scene.getTotalNbRooms() == 4)
-        self.assertTrue(scene.getTotalNbObjects() == 59)
-        self.assertTrue(scene.getTotalNbAgents() == 1)
+    def testVec3ToNumpyArray(self):
+        xr = np.random.random((3,))
+        vec = LVector3(*xr.ravel())
+        x = vec3ToNumpyArray(vec)
+        self.assertTrue(np.allclose(x, xr, atol=1e-6))
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
     np.seterr(all='raise')
     unittest.main()
-        
+    

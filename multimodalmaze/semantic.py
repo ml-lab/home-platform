@@ -30,10 +30,9 @@ import numpy as np
 
 from string import digits
 
-from panda3d.core import Loader, LoaderOptions, NodePath, Filename
-
 from multimodalmaze.constants import MATERIAL_TABLE, MATERIAL_COLOR_TABLE
-from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation
+from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation,\
+    ObjectVoxelData
 from multimodalmaze.rendering import getColorAttributesFromModel
 
 logger = logging.getLogger(__name__)
@@ -42,14 +41,7 @@ class MaterialTable(object):
     @staticmethod
     def getMaterialNameFromObject(obj, thresholdRelArea=0.2):
 
-        # Load the model
-        loader = Loader.getGlobalPtr()
-        loaderOptions = LoaderOptions()
-        node = loader.loadSync(Filename(obj.modelFilename), loaderOptions)
-        if node is not None:
-            nodePath = NodePath(node)
-        else:
-            raise IOError('Could not load model file: %s' % (obj.modelFilename))
+        nodePath = obj.find('**/model*')
 
         # Get the list of materials
         areas, _, _, textures = getColorAttributesFromModel(nodePath)
@@ -81,24 +73,14 @@ class MaterialTable(object):
         # Remove duplicates (if any)
         materialDescriptions = list(set(materialDescriptions))
 
-        # Unload model
-        nodePath.removeNode()
-
         return materialDescriptions
 
 
 class MaterialColorTable(object):
     @staticmethod
-    def getBasicColorsFromObject(obj, mode='advanced', thresholdRelArea=0.2):
+    def getColorsFromObject(obj, mode='advanced', thresholdRelArea=0.2):
 
-        # Load the model
-        loader = Loader.getGlobalPtr()
-        loaderOptions = LoaderOptions()
-        node = loader.loadSync(Filename(obj.modelFilename), loaderOptions)
-        if node is not None:
-            nodePath = NodePath(node)
-        else:
-            raise IOError('Could not load model file: %s' % (obj.modelFilename))
+        nodePath = obj.find('**/model*')
 
         # Get the list of materials
         areas, colors, transparencies, _ = getColorAttributesFromModel(nodePath)
@@ -135,9 +117,6 @@ class MaterialColorTable(object):
         # Remove duplicates (if any)
         colorDescriptions = list(set(colorDescriptions))
 
-        # Unload model
-        nodePath.removeNode()
-
         return colorDescriptions
 
 class DimensionTable(object):
@@ -151,14 +130,14 @@ class DimensionTable(object):
                           ['huge', 2.0]]
     
     @staticmethod
-    def getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename):
+    def getDimensionsFromModelId(modelId, modelInfoFilename, modelCatFilename):
         
         modelInfo = ModelInformation(modelInfoFilename)
         modelCat = ModelCategoryMapping(modelCatFilename)
         
         refModelDimensions = None
         otherSimilarDimensions = []
-        refModelId = str(obj.modelId)
+        refModelId = str(modelId)
         refCategory = modelCat.getCoarseGrainedCategoryForModelId(refModelId)
         for modelId in modelInfo.model_info.keys():
             category = modelCat.getCoarseGrainedCategoryForModelId(modelId)
@@ -203,75 +182,122 @@ class DimensionTable(object):
         
         return overallSizeTag
 
-class SemanticWorld(object):
-    def __init__(self):
-        pass
-
-    def addObjectToScene(self, obj):
-        pass
-
-    def addRoomToScene(self, room):
-        pass
-
-    def addHouseToScene(self, house):
-        pass
-
-
-class SuncgSemanticWorld(SemanticWorld):
-    def __init__(self, datasetRoot):
-        self.datasetRoot = datasetRoot
-        self.categoryMapping = ModelCategoryMapping(
-            os.path.join(
-                datasetRoot,
-                'metadata',
-                'ModelCategoryMapping.csv')
-        )
-
-    def _describeObjectCategory(self, obj):
-        category = self.categoryMapping.getFineGrainedCategoryForModelId(obj.modelId)
-        desc = category.replace("_", " ")
-        return desc
-
-    def _describeObjectColor(self, obj):
-        colors = MaterialColorTable.getBasicColorsFromObject(obj, mode='advanced')
-        desc = ', '.join(colors)
-        return desc
-
-    def _describeObjectMaterial(self, obj):
-        materials = MaterialTable.getMaterialNameFromObject(obj)
-        desc = 'made of ' + ','.join(materials)
-        return desc
-
-    def _describeObjectSize(self, obj):
-        modelInfoFilename = os.path.join(self.datasetRoot,
-                                        'metadata',
-                                        'models.csv')
-        modelCatFilename = os.path.join(self.datasetRoot,
-                                        'metadata',
-                                        'ModelCategoryMapping.csv')
-        desc = DimensionTable.getDimensionsFromObject(obj, modelInfoFilename, modelCatFilename)
-        
-        if desc == 'normal':
-            desc = ''
-        return desc
+class SuncgSemantics(object):
     
-    def describeObject(self, obj):
-        items = []
-
-        sizeDescription = self._describeObjectSize(obj)
-        items.append(sizeDescription)
+    # XXX: is not a complete list of movable objects, and the list is redundant with the one for physics
+    movableObjectCategories = ['table', 'dressing_table', 'sofa', 'trash_can', 'chair', 'ottoman', 'bed']
+    
+    def __init__(self, scene, suncgDatasetRoot):
+        self.scene = scene
+        self.suncgDatasetRoot = suncgDatasetRoot
         
-        # TODO: color attribute of the main material RGB values
-        colorDescription = self._describeObjectColor(obj)
-        items.append(colorDescription)
+        if suncgDatasetRoot is not None:
+            self.categoryMapping = ModelCategoryMapping(
+                os.path.join(
+                    self.suncgDatasetRoot,
+                    'metadata',
+                    'ModelCategoryMapping.csv')
+            )
+        else:
+            self.categoryMapping = None
 
-        # TODO: category attribute from the SUNCG mapping
-        categoryDescription = self._describeObjectCategory(obj)
-        items.append(categoryDescription)
+        self._initLayoutModels()
+        self._initAgents()
+        self._initObjects()
+    
+        self.scene.worlds['semantics'] = self
 
-        # TODO: material attribute of the main textures
-        materialDescription = self._describeObjectMaterial(obj)
-        items.append(materialDescription)
+    def _initLayoutModels(self):
+        
+        # Load layout objects as meshes
+        for _ in self.scene.scene.findAllMatches('**/layouts/object*/model*'):
+            # Nothing to do
+            pass
+    
+    def _initAgents(self):
+    
+        # Load agents
+        for _ in self.scene.scene.findAllMatches('**/agents/agent*'):
+            # Nothing to do
+            pass
+            
+    def _initObjects(self):
+    
+        # Load objects
+        for model in self.scene.scene.findAllMatches('**/objects/object*/model*'):
+            modelId = model.getParent().getTag('model-id')
+            
+            objNp = model.getParent()
+            
+            semanticsNp = objNp.attachNewNode('semantics')
+            
+            # Categories
+            coarseCategory = self.categoryMapping.getCoarseGrainedCategoryForModelId(modelId)
+            semanticsNp.setTag('coarse-category', coarseCategory)
+            
+            fineCategory = self.categoryMapping.getFineGrainedCategoryForModelId(modelId)
+            semanticsNp.setTag('fine-category', fineCategory)
+            
+            # Estimate mass of object based on volumetric data and default material density
+            objVoxFilename = os.path.join(self.suncgDatasetRoot, 'object_vox', 'object_vox_data', modelId, modelId + '.binvox')
+            voxelData = ObjectVoxelData.fromFile(objVoxFilename)
+            volume = voxelData.getFilledVolume()
+            semanticsNp.setTag('volume', str(volume))
+            
+            #XXX: we could get information below from physic node (if any)
+            if coarseCategory in self.movableObjectCategories:
+                semanticsNp.setTag('movable', 'true')
+            else:
+                semanticsNp.setTag('movable', 'false')
+                
+            #TODO: add mass information
+            
+            # Color information
+            basicColors = MaterialColorTable.getColorsFromObject(objNp, mode='basic')
+            semanticsNp.setTag('basic-colors', ",".join(basicColors))
+            
+            advancedColors = MaterialColorTable.getColorsFromObject(objNp, mode='advanced')
+            semanticsNp.setTag('advanced-colors', ",".join(advancedColors))
 
-        desc = " ".join(items)
+            # Material information
+            materials = MaterialTable.getMaterialNameFromObject(objNp)
+            semanticsNp.setTag('materials', ",".join(materials))
+            
+            # Object size information
+            modelInfoFilename = os.path.join(self.suncgDatasetRoot,
+                                            'metadata',
+                                            'models.csv')
+            modelCatFilename = os.path.join(self.suncgDatasetRoot,
+                                            'metadata',
+                                            'ModelCategoryMapping.csv')
+            overallSize = DimensionTable.getDimensionsFromModelId(modelId, modelInfoFilename, modelCatFilename)
+            semanticsNp.setTag('overall-size', str(overallSize))
+            
+    def describeObject(self, obj):
+        
+        semanticsNp = obj.find('**/semantics')
+        if not semanticsNp.isEmpty():
+            
+            items = []
+            
+            sizeDescription = semanticsNp.getTag('overall-size')
+            if sizeDescription == 'normal':
+                sizeDescription = ''
+            items.append(sizeDescription)
+
+            colorDescription = semanticsNp.getTag('advanced-colors')
+            items.append(colorDescription)
+     
+            categoryDescription = semanticsNp.getTag('fine-category')
+            categoryDescription = categoryDescription.replace("_", " ")
+            items.append(categoryDescription)
+     
+            materialDescription = semanticsNp.getTag('materials')
+            materialDescription = 'made of ' + materialDescription
+            items.append(materialDescription)
+     
+            desc = " ".join(items)    
+        else:
+            desc = ""
+        
         return desc

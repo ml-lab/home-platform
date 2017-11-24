@@ -31,262 +31,257 @@ import logging
 import numpy as np
 import scipy.ndimage
 
-from panda3d.core import VBase4, Mat4, PointLight, AmbientLight, AntialiasAttrib, \
+from panda3d.core import VBase4, PointLight, AmbientLight, AntialiasAttrib, \
                          GeomVertexReader, GeomTristrips, GeomTriangles, LineStream, SceneGraphAnalyzer, \
-                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, TransformState, GeomEnums
+                         LVecBase3f, LVecBase4f, TransparencyAttrib, ColorAttrib, TextureAttrib, GeomEnums
                          
-from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, LoaderOptions, NodePath, RescaleNormalAttrib, Filename, \
+from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, RescaleNormalAttrib, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
+
+from multimodalmaze.core import World
 
 logger = logging.getLogger(__name__)
 
 MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "models")
 
-class RenderObject(object):
-   
-    def getTransform(self):
-        return NotImplementedError()
+class Panda3dRenderer(World):
 
-    def setTransform(self):
-        return NotImplementedError()
+    def __init__(self, scene, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=40.0, depth=True):
 
-class RenderWorld(object):
-
-    def addAgentToScene(self, agent):
-        return NotImplementedError()
-
-    def addObjectToScene(self, obj):
-        return NotImplementedError()
-    
-    def addRoomToScene(self, room):
-        return NotImplementedError()
-    
-    def addHouseToScene(self, house):
-        return NotImplementedError()
-
-    def step(self, time):
-        return NotImplementedError()
-    
-    def resetScene(self):
-        return NotImplementedError()
-
-
-class Panda3dRenderObject(RenderObject):
-    
-    def __init__(self, nodePath, recenterTransform=None):
-        self.nodePath = nodePath
-    
-        if recenterTransform is None:
-            recenterTransform = TransformState.makeIdentity()
-        self.recenterTransform = recenterTransform
-    
-    def getTransform(self):
-        transform = self.nodePath.node().getTransform()
-        mat = transform.compose(TransformState.makePos(-self.recenterTransform.getPos())).getMat()
-        return np.array([[mat[0][0], mat[0][1], mat[0][2], mat[0][3]],
-                         [mat[1][0], mat[1][1], mat[1][2], mat[1][3]],
-                         [mat[2][0], mat[2][1], mat[2][2], mat[2][3]],
-                         [mat[3][0], mat[3][1], mat[3][2], mat[3][3]]])
-
-    def setTransform(self, transform):
-        mat = Mat4(*transform.ravel())
-        self.nodePath.setTransform(TransformState.makeMat(mat).compose(self.recenterTransform))
-
-    def getRecenterPosition(self):
-        position = self.recenterTransform.getPos()
-        return np.array([position.x, position.y, position.z])
-
-class Panda3dRenderWorld(RenderWorld):
-
-    #TODO: add a debug mode showing wireframe only?
-    #      render.setRenderModeWireframe()
-
-    def __init__(self, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=75.0, depth=True):
+        super(Panda3dRenderer, self).__init__()
         
-        self.size = size
-        self.mode = mode
-        self.zNear = zNear
-        self.zFar = zFar
-        self.fov = fov
-        self.depth = depth
+        self.__dict__.update(scene=scene, size=size, mode=mode, zNear=zNear, zFar=zFar, fov=fov, 
+                             depth=depth, shadowing=shadowing, showCeiling=showCeiling)
+        
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
         self.graphicsEngine.setDefaultLoader(self.loader)
         
-        self.render = NodePath('render')
-        self.render.setAttrib(RescaleNormalAttrib.makeDefault())
-        self.render.setTwoSided(0)
+        # Change some scene attributes for rendering
+        self.scene.scene.setAttrib(RescaleNormalAttrib.makeDefault())
+        self.scene.scene.setTwoSided(0)
+        
+        self._initModels()
         
         selection = GraphicsPipeSelection.getGlobalPtr()
         self.pipe = selection.makeDefaultPipe()
         logger.debug('Using %s' % (self.pipe.getInterfaceName()))
         
-        self.camera = self.render.attachNewNode(ModelNode('camera'))
-        self.camera.node().setPreserveTransform(ModelNode.PTLocal)
+        # Attach a camera to every agent in the scene
+        self.cameras = []
+        for agentNp in self.scene.scene.findAllMatches('**/agents/agent*'):
+            camera = agentNp.attachNewNode(ModelNode('camera'))
+            camera.node().setPreserveTransform(ModelNode.PTLocal)
+            self.cameras.append(camera)
         
-        self.scene = self.render.attachNewNode('scene')
+        self.rgbBuffers = dict()
+        self.rgbTextures = dict()
+        self.depthBuffers = dict()
+        self.depthTextures = dict()
         
         self._initRgbCapture()
-        
         if self.depth:
             self._initDepthCapture()
-        
-        self.__dict__.update(shadowing=shadowing, showCeiling=showCeiling)
 
-        self.agent = None
+        self._addDefaultLighting()
+
+        self.scene.worlds['render'] = self
+
+    def _initModels(self):
+        
+        for model in self.scene.scene.findAllMatches('**/+ModelNode'):
+            
+            objectNp = model.getParent()
+            rendererNp = objectNp.attachNewNode('render')
+            model = model.copyTo(rendererNp)
+            model.show()
 
     def _initRgbCapture(self):
 
-        camNode = Camera('RGB camera')
-        lens = PerspectiveLens()
-        lens.setFov(self.fov)
-        lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
-        lens.setNear(self.zNear)
-        lens.setFar(self.zFar)
-        camNode.setLens(lens)
-        camNode.setScene(self.render)
-        cam = self.camera.attachNewNode(camNode)
+        for camera in self.cameras:
+            
+            camNode = Camera('RGB camera')
+            lens = PerspectiveLens()
+            lens.setFov(self.fov)
+            lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
+            lens.setNear(self.zNear)
+            lens.setFar(self.zFar)
+            camNode.setLens(lens)
+            camNode.setScene(self.scene.scene)
+            cam = camera.attachNewNode(camNode)
+            
+            winprops = WindowProperties.size(self.size[0], self.size[1])
+            fbprops = FrameBufferProperties.getDefault()
+            fbprops = FrameBufferProperties(fbprops)
+            fbprops.setRgbaBits(8, 8, 8, 0)
+            
+            flags = GraphicsPipe.BFFbPropsOptional
+            if self.mode == 'onscreen':
+                flags = flags | GraphicsPipe.BFRequireWindow
+            elif self.mode == 'offscreen':
+                flags = flags | GraphicsPipe.BFRefuseWindow
+            else:
+                raise Exception('Unsupported rendering mode: %s' % (self.mode))
+            
+            buf = self.graphicsEngine.makeOutput(self.pipe, 'RGB buffer', 0, fbprops,
+                                                 winprops, flags)
+            if buf is None:
+                raise Exception('Unable to create RGB buffer')
+            
+            # Set to render at the end
+            buf.setSort(10000)
+            
+            dr = buf.makeDisplayRegion()
+            dr.setSort(0)
+            dr.setCamera(cam)
+            dr = camNode.getDisplayRegion(0)
+            
+            tex = Texture()
+            tex.setFormat(Texture.FRgb8)
+            tex.setComponentType(Texture.TUnsignedByte)
+            buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
+            #XXX: should use tex.setMatchFramebufferFormat(True)?
         
-        winprops = WindowProperties.size(self.size[0], self.size[1])
-        fbprops = FrameBufferProperties.getDefault()
-        fbprops = FrameBufferProperties(fbprops)
-        fbprops.setRgbaBits(8, 8, 8, 0)
-        
-        flags = GraphicsPipe.BFFbPropsOptional
-        if self.mode == 'onscreen':
-            flags = flags | GraphicsPipe.BFRequireWindow
-        elif self.mode == 'offscreen':
-            flags = flags | GraphicsPipe.BFRefuseWindow
-        else:
-            raise Exception('Unsupported rendering mode: %s' % (self.mode))
-        
-        buf = self.graphicsEngine.makeOutput(self.pipe, 'RGB buffer', 0, fbprops,
-                                             winprops, flags)
-        if buf is None:
-            raise Exception('Unable to create RGB buffer')
-        
-        # Set to render at the end
-        buf.setSort(10000)
-        
-        dr = buf.makeDisplayRegion()
-        dr.setSort(0)
-        dr.setCamera(cam)
-        dr = camNode.getDisplayRegion(0)
-        
-        tex = Texture()
-        tex.setFormat(Texture.FRgb8)
-        tex.setComponentType(Texture.TUnsignedByte)
-        buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPColor)
-        #XXX: should use tex.setMatchFramebufferFormat(True)?
-        
-        self.rgbBuffer = buf
-        self.rgbTex = tex
+            agent = camera.getParent()
+            self.rgbBuffers[agent.getName()] = buf
+            self.rgbTextures[agent.getName()] = tex
     
     def _initDepthCapture(self):
         
-        camNode = Camera('Depth camera')
-        lens = PerspectiveLens()
-        lens.setFov(self.fov)
-        lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
-        lens.setNear(self.zNear)
-        lens.setFar(self.zFar)
-        camNode.setLens(lens)
-        camNode.setScene(self.render)
-        cam = self.camera.attachNewNode(camNode)
+        for camera in self.cameras:
         
-        winprops = WindowProperties.size(self.size[0], self.size[1])
-        fbprops = FrameBufferProperties.getDefault()
-        fbprops = FrameBufferProperties(fbprops)
-        fbprops.setRgbColor(False)
-        fbprops.setRgbaBits(0, 0, 0, 0)
-        fbprops.setStencilBits(0)
-        fbprops.setMultisamples(0)
-        fbprops.setBackBuffers(0)
-        fbprops.setDepthBits(16)
+            camNode = Camera('Depth camera')
+            lens = PerspectiveLens()
+            lens.setFov(self.fov)
+            lens.setAspectRatio(float(self.size[0]) / float(self.size[1]))
+            lens.setNear(self.zNear)
+            lens.setFar(self.zFar)
+            camNode.setLens(lens)
+            camNode.setScene(self.scene.scene)
+            cam = camera.attachNewNode(camNode)
+            
+            winprops = WindowProperties.size(self.size[0], self.size[1])
+            fbprops = FrameBufferProperties.getDefault()
+            fbprops = FrameBufferProperties(fbprops)
+            fbprops.setRgbColor(False)
+            fbprops.setRgbaBits(0, 0, 0, 0)
+            fbprops.setStencilBits(0)
+            fbprops.setMultisamples(0)
+            fbprops.setBackBuffers(0)
+            fbprops.setDepthBits(16)
+            
+            flags = GraphicsPipe.BFFbPropsOptional
+            if self.mode == 'onscreen':
+                flags = flags | GraphicsPipe.BFRequireWindow
+            elif self.mode == 'offscreen':
+                flags = flags | GraphicsPipe.BFRefuseWindow
+            else:
+                raise Exception('Unsupported rendering mode: %s' % (self.mode))
+            
+            buf = self.graphicsEngine.makeOutput(self.pipe, 'Depth buffer', 0, fbprops,
+                                                 winprops, flags)
+            if buf is None:
+                raise Exception('Unable to create depth buffer')
+            
+            # Set to render at the end
+            buf.setSort(10000)
+            
+            dr = buf.makeDisplayRegion()
+            dr.setSort(0)
+            dr.setCamera(cam)
+            dr = camNode.getDisplayRegion(0)
+            
+            tex = Texture()
+            tex.setFormat(Texture.FDepthComponent)
+            tex.setComponentType(Texture.TFloat)
+            buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPDepth)
+            #XXX: should use tex.setMatchFramebufferFormat(True)?
+            
+            agent = camera.getParent()
+            self.depthBuffers[agent.getName()] = buf
+            self.depthTextures[agent.getName()] = tex
         
-        flags = GraphicsPipe.BFFbPropsOptional
-        if self.mode == 'onscreen':
-            flags = flags | GraphicsPipe.BFRequireWindow
-        elif self.mode == 'offscreen':
-            flags = flags | GraphicsPipe.BFRefuseWindow
-        else:
-            raise Exception('Unsupported rendering mode: %s' % (self.mode))
+    def setWireframeOnly(self):
+        self.scene.scene.setRenderModeWireframe()
         
-        buf = self.graphicsEngine.makeOutput(self.pipe, 'Depth buffer', 0, fbprops,
-                                             winprops, flags)
-        if buf is None:
-            raise Exception('Unable to create depth buffer')
+    def showRoomLayout(self, showCeilings=True, showWalls=True, showFloors=True):
         
-        # Set to render at the end
-        buf.setSort(10000)
-        
-        dr = buf.makeDisplayRegion()
-        dr.setSort(0)
-        dr.setCamera(cam)
-        dr = camNode.getDisplayRegion(0)
-        
-        tex = Texture()
-        tex.setFormat(Texture.FDepthComponent)
-        tex.setComponentType(Texture.TFloat)
-        buf.addRenderTexture(tex, GraphicsOutput.RTMCopyRam, GraphicsOutput.RTPDepth)
-        #XXX: should use tex.setMatchFramebufferFormat(True)?
-        
-        self.depthBuffer = buf
-        self.depthTex = tex
+        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*c'):
+            if showCeilings:
+                np.show()
+            else:
+                np.hide()
+    
+        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*w'):
+            if showWalls:
+                np.show()
+            else:
+                np.hide()
+            
+        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*f'):
+            if showFloors:
+                np.show()
+            else:
+                np.hide()
         
     def destroy(self):
         self.graphicsEngine.removeAllWindows()
         del self.pipe
 
-    def getRgbImage(self, channelOrder="RGB"):
-        data = self.rgbTex.getRamImageAs(channelOrder)
-        image = np.frombuffer(data.get_data(), np.uint8) # Must match Texture.TUnsignedByte
-        image.shape = (self.rgbTex.getYSize(), self.rgbTex.getXSize(), 3)
-        image = np.flipud(image)
-        return image
+    def getRgbImages(self, channelOrder="RGB"):
+        images = dict()
+        for name, tex in self.rgbTextures.iteritems():
+            data = tex.getRamImageAs(channelOrder)
+            image = np.frombuffer(data.get_data(), np.uint8) # Must match Texture.TUnsignedByte
+            image.shape = (tex.getYSize(), tex.getXSize(), 3)
+            image = np.flipud(image)
+            images[name] = image
+            
+        return images
     
-    def getDepthImage(self, mode='normalized'):
+    def getDepthImages(self, mode='normalized'):
         
+        images = dict()
         if self.depth:
         
-            data = self.depthTex.getRamImage().get_data()
-            nbBytesComponentFromData = len(data) / (self.depthTex.getYSize() * self.depthTex.getXSize())
-            if nbBytesComponentFromData == 4:
-                depthImage = np.frombuffer(data, np.float32) # Must match Texture.TFloat
-            elif nbBytesComponentFromData == 2:
-                # NOTE: This can happen on some graphic hardware, where unsigned 16-bit data is stored
-                #       despite setting the texture component type to 32-bit floating point.
-                depthImage = np.frombuffer(data, np.uint16).astype()
-                depthImage = depthImage.astype(np.float32) / 65535
+            for name, tex in self.depthTextures.iteritems():
+        
+                data = tex.getRamImage().get_data()
+                nbBytesComponentFromData = len(data) / (tex.getYSize() * tex.getXSize())
+                if nbBytesComponentFromData == 4:
+                    depthImage = np.frombuffer(data, np.float32) # Must match Texture.TFloat
+                elif nbBytesComponentFromData == 2:
+                    # NOTE: This can happen on some graphic hardware, where unsigned 16-bit data is stored
+                    #       despite setting the texture component type to 32-bit floating point.
+                    depthImage = np.frombuffer(data, np.uint16).astype()
+                    depthImage = depthImage.astype(np.float32) / 65535
+                    
+                depthImage.shape = (tex.getYSize(), tex.getXSize())
+                depthImage = np.flipud(depthImage)
                 
-            depthImage.shape = (self.depthTex.getYSize(), self.depthTex.getXSize())
-            depthImage = np.flipud(depthImage)
-            
-            if mode == 'distance':
-                # NOTE: in Panda3d, the returned depth image seems to be already linearized
-                depthImage = self.zNear + depthImage / (self.zFar - self.zNear)
-    
-                # Adapted from: https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
-                #depthImage = 2.0 * depthImage - 1.0
-                #depthImage = 2.0 * self.zNear * self.zFar / (self.zFar + self.zNear - depthImage * (self.zFar - self.zNear))
+                if mode == 'distance':
+                    # NOTE: in Panda3d, the returned depth image seems to be already linearized
+                    depthImage = self.zNear + depthImage / (self.zFar - self.zNear)
+        
+                    # Adapted from: https://stackoverflow.com/questions/6652253/getting-the-true-z-value-from-the-depth-buffer
+                    #depthImage = 2.0 * depthImage - 1.0
+                    #depthImage = 2.0 * self.zNear * self.zFar / (self.zFar + self.zNear - depthImage * (self.zFar - self.zNear))
+                    
+                elif mode == 'normalized':
+                    # Nothing to do
+                    pass
+                else:
+                    raise Exception('Unsupported output depth image mode: %s' % (mode))
                 
-            elif mode == 'normalized':
-                # Nothing to do
-                pass
-            else:
-                raise Exception('Unsupported output depth image mode: %s' % (mode))
+                images[name] = depthImage
         else:
-            depthImage = np.zeros(self.size, dtype=np.float32)
+            
+            for name, _ in self.depthTextures.iteritems():
+                images[name] = np.zeros(self.size, dtype=np.float32)
         
-        return depthImage
+        return images
 
-    def step(self):
-        
-        # Update position of camera based on agent
-        if self.agent is not None:
-            transform = self.agent.transform
-            mat = Mat4(*transform.ravel())
-            self.camera.setMat(mat)
+    def step(self, dt):
         
         self.graphicsEngine.renderFrame()
         
@@ -294,9 +289,9 @@ class Panda3dRenderWorld(RenderWorld):
         if self.mode == 'onscreen':
             self.graphicsEngine.renderFrame()
         
-    def _renderInfo(self):
+    def getRenderInfo(self):
         sga = SceneGraphAnalyzer()
-        sga.addNode(self.render.node())
+        sga.addNode(self.scene.scene.node())
         
         ls = LineStream()
         sga.write(ls)
@@ -305,115 +300,28 @@ class Panda3dRenderWorld(RenderWorld):
             desc.append(ls.getLine())
         desc = '\n'.join(desc)
         return desc
-        
-    def _loadModel(self, modelPath):
-        loaderOptions = LoaderOptions()
-        node = self.loader.loadSync(Filename(modelPath), loaderOptions)
-        if node is not None:
-            nodePath = NodePath(node)
-        else:
-            raise IOError('Could not load model file: %s' % (modelPath))
-        return nodePath
 
-    def addDefaultLighting(self):
+    def _addDefaultLighting(self):
         alight = AmbientLight('alight')
         alight.setColor(VBase4(0.2, 0.2, 0.2, 1))
-        alnp = self.scene.attachNewNode(alight)
-        self.scene.setLight(alnp)
+        alnp = self.scene.scene.attachNewNode(alight)
+        self.scene.scene.setLight(alnp)
         
-        #NOTE: Point light following the camera
-        plight = PointLight('plight')
-        plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
-        plnp = self.camera.attachNewNode(plight)
-        self.scene.setLight(plnp)
-        
-        if self.shadowing:
-            # Use a 512x512 resolution shadow map
-            plight.setShadowCaster(True, 512, 512)
-
-            # Enable the shader generator for the receiving nodes
-            self.scene.setShaderAuto()
-            self.scene.setAntialias(AntialiasAttrib.MAuto)
-    
-    def setCamera(self, mat):
-        mat = Mat4(*mat.ravel())
-        self.camera.setMat(mat)
-    
-    def addAgentToScene(self, agent):
-        
-        if not self.agent is None:
-            raise NotImplementedError('Agent already present in the scene. Support for multiple agents is not yet available')
-        
-        nodePath = self.scene.attachNewNode('agent-' + str(agent.instanceId))
-        nodePath.reparentTo(self.scene)
-        
-        if agent.modelFilename is not None:
-            model = self._loadModel(agent.modelFilename)
-            model.reparentTo(nodePath)
+        for camera in self.cameras:
             
-            instance = Panda3dRenderObject(nodePath)
-            agent.setRenderObject(instance)
-        else:
-            instance = Panda3dRenderObject(nodePath)
-            agent.setRenderObject(instance)
-        
-        agent.assertConsistency()
-        
-        self.agent = agent
-
-        return nodePath # for backwards compatibility
-        
-    def addObjectToScene(self, obj):
-
-        nodePath = self.scene.attachNewNode('object-' + str(obj.instanceId))
-        model = self._loadModel(obj.modelFilename)
-        model.reparentTo(nodePath)
-        
-        instance = Panda3dRenderObject(nodePath)
-        obj.setRenderObject(instance)
-        
-        obj.assertConsistency()
-        
-    def addRoomToScene(self, room):
-
-        for modelFilename in room.modelFilenames:
+            #NOTE: Point light following the camera
+            plight = PointLight('plight')
+            plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
+            plnp = camera.attachNewNode(plight)
+            self.scene.scene.setLight(plnp)
             
-            partId = os.path.splitext(os.path.basename(modelFilename))[0]
-            objNodePath = self.scene.attachNewNode('room-' + str(room.instanceId) + '-' + partId)
-            model = self._loadModel(modelFilename)
-            model.reparentTo(objNodePath)
-            
-            if not self.showCeiling and 'c' in os.path.basename(modelFilename):
-                objNodePath.hide()
-                
-        for idx, obj in enumerate(room.objects):
-            self.addObjectToScene(obj)
-            room.objects[idx] = obj
+            if self.shadowing:
+                # Use a 512x512 resolution shadow map
+                plight.setShadowCaster(True, 512, 512)
     
-    def addHouseToScene(self, house):
-
-        for room in house.rooms:
-            self.addRoomToScene(room)
-        
-        for room in house.grounds:
-            self.addRoomToScene(room)
-        
-        for idx, obj in enumerate(house.objects):
-            self.addObjectToScene(obj)
-            house.objects[idx] = obj
-
-    def resetScene(self):
-        # FIXME: find out why this function outputs a lot of logs to STDERR 
-        childNodes = self.scene.ls()
-        if childNodes is not None:
-            for node in childNodes:
-                node.detachNode()
-                node.removeNode()
-        self.scene.clearLight()
-        self.scene.clearShader()
-        self.scene.detachNode()
-        self.scene.removeNode()
-        self.scene = self.render.attachNewNode('scene')
+                # Enable the shader generator for the receiving nodes
+                self.scene.scene.setShaderAuto()
+                self.scene.scene.setAntialias(AntialiasAttrib.MAuto)
 
 def get3DPointsFromModel(model):
     geomNodes = model.findAllMatches('**/+GeomNode')

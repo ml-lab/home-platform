@@ -20,7 +20,7 @@ fi
 
 # Run unit tests and coverage analysis for the 'action' module
 nosetests --verbosity 3 --with-coverage --cover-html --cover-html-dir=${DIR}/report/coverage \
---cover-erase --cover-tests --cover-package=multimodalmaze,multimodalmaze.acoustics,multimodalmaze.core,multimodalmaze.physics,multimodalmaze.rendering,multimodalmaze.suncg
+--cover-erase --cover-tests --cover-package=multimodalmaze,multimodalmaze.acoustics,multimodalmaze.core,multimodalmaze.physics,multimodalmaze.rendering,multimodalmaze.suncg,multimodalmaze.utils,multimodalmaze.env,multimodalmaze.constants,multimodalmaze.semantic
 if type "x-www-browser" > /dev/null; then
 	x-www-browser ${DIR}/report/coverage/index.html
 fi
