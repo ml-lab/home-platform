@@ -33,7 +33,7 @@ import unittest
 import matplotlib.pyplot as plt
 
 from multimodalmaze.rendering import Panda3dRenderer
-from multimodalmaze.suncg import SunCgSceneLoader, loadModel
+from multimodalmaze.suncg import SunCgSceneLoader, loadModel, SunCgModelLights
 from panda3d.core import LMatrix4f, TransformState, LVecBase3
 from multimodalmaze.core import Scene
 from multimodalmaze.utils import Viewer
@@ -87,7 +87,8 @@ class TestPanda3dRenderer(unittest.TestCase):
         
         scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
         
-        renderer = Panda3dRenderer(scene, shadowing=False, showCeiling=False, mode='offscreen')
+        modelLightsInfo = SunCgModelLights(os.path.join(TEST_SUNCG_DATA_DIR, 'metadata', 'suncgModelLights.json'))
+        renderer = Panda3dRenderer(scene, shadowing=True, mode='offscreen', modelLightsInfo=modelLightsInfo)
         renderer.showRoomLayout(showCeilings=False)
         
         mat = np.array([0.999992, 0.00394238, 0, 0,

@@ -197,22 +197,3 @@ class HomeEnv(gym.Env):
                 self._create_window()
 
             self._update_human_render()
-
-
-if __name__ == '__main__':
-    import multimodalmaze.gym  # to make the environment available in gym.make()
-    import time
-
-    env = gym.make("Home-v0")
-    env.reset()
-
-    env.render("human")
-
-    for i in range(20):
-        action = env.action_space.sample()
-        print ("action:", action)
-
-        obs, rew, done, misc = env.step(action)
-        env.render("human")
-        time.sleep(.5)
-        # print ("obs:", obs, "rew:", rew, "done:", done, "misc:", misc)

@@ -65,3 +65,6 @@ basic-shaders-only #f
 
 # Enable the multithreaded render pipeline (triples the framerate)
 #threading-model Cull/Draw
+
+# Disable V-Sync
+sync-video #f

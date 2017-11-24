@@ -25,15 +25,19 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
+import time
 import logging
 import numpy as np
 import unittest
+from multimodalmaze.core import Scene
+from panda3d.core import TransformState, LVector3f
+from multimodalmaze.utils import Viewer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
 from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation, ObjectVoxelData,\
-    SunCgSceneLoader
+    SunCgSceneLoader, SunCgModelLights, loadModel
 
 class TestModelCategoryMapping(unittest.TestCase):
 
@@ -67,6 +71,70 @@ class TestSunCgSceneLoader(unittest.TestCase):
         self.assertTrue(scene.getTotalNbRooms() == 4)
         self.assertTrue(scene.getTotalNbObjects() == 59)
         self.assertTrue(scene.getTotalNbAgents() == 1)
+        
+class TestSunCgModelLights(unittest.TestCase):
+        
+    def testLoadFromJson(self):
+        filename = os.path.join(TEST_SUNCG_DATA_DIR, 'metadata', 'suncgModelLights.json')
+        info = SunCgModelLights(filename)
+        
+        lights = info.getLightsForModel(modelId='s__1296')
+        self.assertTrue(len(lights) == 2)
+        
+        lights = info.getLightsForModel(modelId='83')
+        self.assertTrue(len(lights) == 0)
+        
+        lights = info.getLightsForModel(modelId='377')
+        self.assertTrue(len(lights) == 1)
+        
+        lights = info.getLightsForModel(modelId='178')
+        self.assertTrue(len(lights) == 1)
+        
+    def testRenderWithModelLights(self):
+        
+        filename = os.path.join(TEST_SUNCG_DATA_DIR, 'metadata', 'suncgModelLights.json')
+        info = SunCgModelLights(filename)
+        
+        scene = Scene()
+        
+        modelId = 's__1296'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        model = loadModel(modelFilename)
+        model.setName('model-' + str(modelId))
+        model.show()
+        
+        objectsNp = scene.scene.attachNewNode('objects')
+        objNp = objectsNp.attachNewNode('object-' + str(modelId))
+        model.reparentTo(objNp)
+        
+        # Calculate the center of this object
+        minBounds, maxBounds = model.getTightBounds()
+        centerPos = minBounds + (maxBounds - minBounds) / 2.0
+         
+        # Add offset transform to make position relative to the center
+        model.setTransform(TransformState.makePos(-centerPos))
+        
+        # Add lights to model
+        for lightNp in info.getLightsForModel(modelId):
+            lightNp.node().setShadowCaster(True, 512, 512)
+            lightNp.reparentTo(model)
+            scene.scene.setLight(lightNp)
+
+        try:
+            viewer = Viewer(scene, interactive=False, shadowing=True)
+    
+            viewer.cam.setTransform(TransformState.makePos(LVector3f(0.5, 0.5, 3.0)))
+            viewer.cam.lookAt(lightNp)
+            
+            for _ in range(20):
+                viewer.step()
+            time.sleep(1.0)
+            
+        finally:
+            viewer.destroy()
+            viewer.graphicsEngine.removeAllWindows()
+        
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

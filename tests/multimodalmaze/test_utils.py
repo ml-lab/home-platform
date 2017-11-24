@@ -49,7 +49,7 @@ class TestViewer(unittest.TestCase):
             for model in scene.scene.findAllMatches('**/+ModelNode'):
                 model.show()
     
-            viewer = Viewer(scene, shadowing=False)
+            viewer = Viewer(scene, shadowing=True)
             
             # Configure the camera
             #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up

@@ -32,7 +32,8 @@ import logging
 import numpy as np
 
 from panda3d.core import NodePath, Loader, LoaderOptions, Filename, TransformState,\
-    LMatrix4f
+    LMatrix4f, Spotlight, VBase4, LVector3f, PointLight, PerspectiveLens,\
+    DirectionalLight, CS_zup_right, CS_yup_right, LVector4f
 
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
 from multimodalmaze.core import Scene
@@ -249,6 +250,94 @@ def reglob(path, exp):
     res = [f for f in os.listdir(path) if m.search(f)]
     res = map(lambda x: "%s/%s" % ( path, x, ), res)
     return res
+
+class SunCgModelLights(object):
+    
+    def __init__(self, filename):
+        
+        with open(filename) as f:
+            self.data = json.load(f)
+        
+        self.supportedModelIds = self.data.keys()
+    
+    def getLightsForModel(self, modelId):
+        lights = []
+        if modelId in self.supportedModelIds:
+            
+            for n, lightData in enumerate(self.data[modelId]):
+                               
+                attenuation = LVector3f(*lightData['attenuation'])
+                
+                #TODO: implement light power
+                #power = float(lightData['power'])
+                
+                positionYup = LVector3f(*lightData['position'])
+                yupTozupMat = LMatrix4f.convertMat(CS_yup_right, CS_zup_right)
+                position = yupTozupMat.xformVec(positionYup)
+                            
+                colorHtml = lightData['color']
+                color = LVector3f(*[int('0x' + colorHtml[i:i+2], 16) for i in range(1, len(colorHtml), 2)]) / 255.0
+                            
+                direction = None
+                lightType = lightData['type']
+                lightName = modelId + '-light-' + str(n)
+                if lightType == 'SpotLight':
+                    light = Spotlight(lightName)
+                    light.setAttenuation(attenuation)
+                    light.setColor(color)
+                     
+                    cutoffAngle = float(lightData['cutoffAngle'])
+                    lens = PerspectiveLens()
+                    lens.setFov(cutoffAngle / np.pi * 180.0)
+                    light.setLens(lens)
+                     
+                    # NOTE: unused attributes
+                    #dropoffRate = float(lightData['dropoffRate'])
+                     
+                    directionYup = LVector3f(*lightData['direction'])
+                    direction = yupTozupMat.xformVec(directionYup)
+                    
+                elif lightType == 'PointLight':
+                    light = PointLight(lightName)
+                    light.setAttenuation(attenuation)
+                    light.setColor(color)
+                    
+                elif lightType == 'LineLight':
+                    #XXX: we may wish to use RectangleLight from the devel branch of Panda3D 
+                    light = PointLight(lightName)
+                    light.setAttenuation(attenuation)
+                    light.setColor(color)
+                    
+                    # NOTE: unused attributes
+                    #dropoffRate = float(lightData['dropoffRate'])
+                    #cutoffAngle = float(lightData['cutoffAngle'])
+                    
+                    #position2Yup = LVector3f(*lightData['position2'])
+                    #position2 = yupTozupMat.xformVec(position2Yup)
+                
+                    #directionYup = LVector3f(*lightData['direction'])
+                    #direction = yupTozupMat.xformVec(directionYup)
+                    
+                else:
+                    raise Exception('Unsupported light type: %s' % (lightType))
+                
+                lightNp = NodePath(light)
+                
+                # Set position and direction of light
+                lightNp.setPos(position)
+                if direction is not None:
+                    targetPos = position + direction
+                    lightNp.look_at(targetPos, LVector3f.up())
+                
+                lights.append(lightNp)
+                
+        return lights
+    
+    def isModelSupported(self, modelId):
+        isSupported = False
+        if modelId in self.supportedModelIds:
+            isSupported = True
+        return isSupported
 
 class SunCgSceneLoader(object):
     

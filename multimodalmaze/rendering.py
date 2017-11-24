@@ -46,12 +46,12 @@ MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..",
 
 class Panda3dRenderer(World):
 
-    def __init__(self, scene, size=(512,512), shadowing=False, showCeiling=True, mode='offscreen', zNear=0.1, zFar=1000.0, fov=40.0, depth=True):
+    def __init__(self, scene, size=(512,512), shadowing=False, mode='offscreen', zNear=0.1, zFar=1000.0, fov=40.0, depth=True, modelLightsInfo=None):
 
         super(Panda3dRenderer, self).__init__()
         
         self.__dict__.update(scene=scene, size=size, mode=mode, zNear=zNear, zFar=zFar, fov=fov, 
-                             depth=depth, shadowing=shadowing, showCeiling=showCeiling)
+                             depth=depth, shadowing=shadowing, modelLightsInfo=modelLightsInfo)
         
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
@@ -322,6 +322,21 @@ class Panda3dRenderer(World):
                 # Enable the shader generator for the receiving nodes
                 self.scene.scene.setShaderAuto()
                 self.scene.scene.setAntialias(AntialiasAttrib.MAuto)
+
+        if self.modelLightsInfo is not None:
+            
+            # Add model-related lights (e.g. lamps)
+            for model in self.scene.scene.findAllMatches('**/+ModelNode'):
+                modelId = model.getNetTag('model-id')
+                for lightNp in self.modelLightsInfo.getLightsForModel(modelId):
+                    
+                    if self.shadowing:
+                        # Use a 512x512 resolution shadow map
+                        lightNp.node().setShadowCaster(True, 512, 512)
+                    
+                    lightNp.reparentTo(model)
+                    
+                    self.scene.scene.setLight(lightNp)
 
 def get3DPointsFromModel(model):
     geomNodes = model.findAllMatches('**/+GeomNode')
