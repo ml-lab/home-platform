@@ -88,7 +88,7 @@ class TestBasicEnvironment(unittest.TestCase):
     def testMultiprocessing(self):
         # Spawn new process with independent simulations using the multiprocessing module
             
-        nbProcesses = 1
+        nbProcesses = 2
         nbSteps = 100
         def worker():
  

@@ -32,7 +32,7 @@ from multimodalmaze.suncg import SunCgSceneLoader
 from multimodalmaze.rendering import Panda3dRenderer
 from multimodalmaze.physics import Panda3dBulletPhysics
 
-from panda3d.core import ClockObject, LVector3f
+from panda3d.core import ClockObject, LVector3f, TransformState
 from multimodalmaze.utils import vec3ToNumpyArray
 
 logger = logging.getLogger(__name__)
@@ -90,17 +90,21 @@ class Observation(object):
 
 
 class BasicEnvironment(object):
-    def __init__(self, houseId, suncgDatasetRoot=None, size=(256, 256), debug=False, depth=False, realtime=False, dt=0.1):
+    def __init__(self, houseId, suncgDatasetRoot=None, size=(256, 256), debug=False, depth=False, realtime=False, dt=0.1, cameraTransform=None):
 
         self.__dict__.update(houseId=houseId, suncgDatasetRoot=suncgDatasetRoot, size=size,
-                             debug=debug, depth=depth, realtime=realtime, dt=dt)
+                             debug=debug, depth=depth, realtime=realtime, dt=dt, cameraTransform=cameraTransform)
 
         self.scene = SunCgSceneLoader.loadHouseFromJson(houseId, suncgDatasetRoot)
 
-        self.physicWorld = Panda3dBulletPhysics(self.scene, suncgDatasetRoot, debug=debug, objectMode='box', 
-                                                agentRadius=0.1, agentHeight=1.6, agentMass=60.0, agentMode='capsule')
+        agentRadius = 0.1
+        agentHeight = 1.6
+        if self.cameraTransform is None:
+            self.cameraTransform = TransformState.makePos(LVector3f(0.0, 0.0, agentHeight/2.0 - agentRadius))
+        self.renderWorld = Panda3dRenderer(self.scene, size, shadowing=False, depth=depth, cameraTransform=self.cameraTransform)
 
-        self.renderWorld = Panda3dRenderer(self.scene, size, shadowing=False, showCeiling=False, depth=depth)
+        self.physicWorld = Panda3dBulletPhysics(self.scene, suncgDatasetRoot, debug=debug, objectMode='box', 
+                                                agentRadius=agentRadius, agentHeight=agentHeight, agentMass=60.0, agentMode='capsule')
 
         self.clock = ClockObject.getGlobalClock()
         
@@ -120,6 +124,19 @@ class BasicEnvironment(object):
         
     def setAgentOrientation(self, orientation):
         self.agentRbNp.setHpr(LVector3f(orientation[0], orientation[1], orientation[2]))
+        
+    def setAgentLinearVelocity(self, linearVelocity):
+        # Apply the local transform to the velocity
+        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
+        rotMat = self.agentRbNp.node().getTransform().getMat().getUpper3()
+        linearVelocity = rotMat.xformVec(linearVelocity)
+        linearVelocity.z = 0.0
+        self.agentRbNp.node().setLinearVelocity(linearVelocity)
+        self.agentRbNp.node().setActive(True, 1)
+    
+    def setAgentAngularVelocity(self, angularVelocity):
+        self.agentRbNp.node().setAngularVelocity(angularVelocity)
+        self.agentRbNp.node().setActive(True, 1)
         
     def applyImpulseToAgent(self, impulse):
         self.agentRbNp.node().applyCentralImpulse(LVector3f(impulse[0], impulse[1], impulse[2]))

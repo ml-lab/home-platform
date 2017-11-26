@@ -46,12 +46,12 @@ MODEL_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..",
 
 class Panda3dRenderer(World):
 
-    def __init__(self, scene, size=(512,512), shadowing=False, mode='offscreen', zNear=0.1, zFar=1000.0, fov=40.0, depth=True, modelLightsInfo=None):
+    def __init__(self, scene, size=(512,512), shadowing=False, mode='offscreen', zNear=0.1, zFar=1000.0, fov=40.0, depth=True, modelLightsInfo=None, cameraTransform=None):
 
         super(Panda3dRenderer, self).__init__()
         
         self.__dict__.update(scene=scene, size=size, mode=mode, zNear=zNear, zFar=zFar, fov=fov, 
-                             depth=depth, shadowing=shadowing, modelLightsInfo=modelLightsInfo)
+                             depth=depth, shadowing=shadowing, modelLightsInfo=modelLightsInfo, cameraTransform=cameraTransform)
         
         self.graphicsEngine = GraphicsEngine.getGlobalPtr()
         self.loader = Loader.getGlobalPtr()
@@ -71,6 +71,8 @@ class Panda3dRenderer(World):
         self.cameras = []
         for agentNp in self.scene.scene.findAllMatches('**/agents/agent*'):
             camera = agentNp.attachNewNode(ModelNode('camera'))
+            if self.cameraTransform is not None:
+                camera.setTransform(cameraTransform)
             camera.node().setPreserveTransform(ModelNode.PTLocal)
             self.cameras.append(camera)
         
@@ -95,6 +97,11 @@ class Panda3dRenderer(World):
             rendererNp = objectNp.attachNewNode('render')
             model = model.copyTo(rendererNp)
             model.show()
+            
+            # Reparent render node below the existing physic node (if any)
+            physicsNp = objectNp.find('**/physics')
+            if not physicsNp.isEmpty():
+                rendererNp.reparentTo(physicsNp)
 
     def _initRgbCapture(self):
 
@@ -206,19 +213,19 @@ class Panda3dRenderer(World):
         
     def showRoomLayout(self, showCeilings=True, showWalls=True, showFloors=True):
         
-        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*c'):
+        for np in self.scene.scene.findAllMatches('**/layouts/**/render/*c'):
             if showCeilings:
                 np.show()
             else:
                 np.hide()
     
-        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*w'):
+        for np in self.scene.scene.findAllMatches('**/layouts/**/render/*w'):
             if showWalls:
                 np.show()
             else:
                 np.hide()
             
-        for np in self.scene.scene.findAllMatches('**/layouts/*/render/*f'):
+        for np in self.scene.scene.findAllMatches('**/layouts/**/render/*f'):
             if showFloors:
                 np.show()
             else:

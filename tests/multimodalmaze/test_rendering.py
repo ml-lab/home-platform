@@ -68,7 +68,7 @@ class TestPanda3dRenderer(unittest.TestCase):
         try:
             renderer = Panda3dRenderer(scene, shadowing=False)
             
-            viewer = Viewer(scene)
+            viewer = Viewer(scene, interactive=False)
             viewer.disableMouse()
     
             viewer.cam.setTransform(TransformState.makePos(LVecBase3(5.0, 0.0, 0.0)))

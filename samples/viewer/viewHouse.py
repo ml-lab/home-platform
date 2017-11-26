@@ -31,7 +31,7 @@ import sys
 import logging
 
 from multimodalmaze.env import BasicEnvironment
-from multimodalmaze.utils import Controller
+from multimodalmaze.utils import Viewer
 
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "tests", "data", "suncg")
 
@@ -41,15 +41,16 @@ def main():
     
     env = BasicEnvironment(houseId="0004d52d1aeeb8ae6de39d6bd993e992", suncgDatasetRoot=TEST_SUNCG_DATA_DIR, realtime=True)
     env.renderWorld.showRoomLayout(showCeilings=False, showWalls=True, showFloors=True)
-    env.setAgentOrientation((60.0, 0.0, 0.0))
-    env.setAgentPosition((42, -39, env.physicWorld.agentHeight/2 + 0.1))
     
-    controller = Controller(env.scene, showPosition=True, cameraTransform=env.cameraTransform)
-    
-    controller.run()
+    viewer = Viewer(env.scene, interactive=True, showPosition=True)
 
-    controller.destroy()
-    controller.graphicsEngine.removeAllWindows()
+    viewer.cam.setPos((42, -39, 1.1))
+    viewer.cam.setHpr(60.0, 0.0, 0.0)
+    
+    viewer.run()
+
+    viewer.destroy()
+    viewer.graphicsEngine.removeAllWindows()
             
     return 0
 

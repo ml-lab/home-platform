@@ -27,12 +27,9 @@
 import sys
 import numpy as np
 
-from panda3d.core import ClockObject, AmbientLight, VBase4, PointLight, AntialiasAttrib, TextNode
+from panda3d.core import ClockObject, AmbientLight, VBase4, PointLight, AntialiasAttrib, TextNode, LVector3f
 
 from direct.showbase.ShowBase import ShowBase, WindowProperties
-from direct.task.TaskManagerGlobal import taskMgr
-from direct.showbase.DirectObject import DirectObject
-from direct.task.Task import Task
 from direct.gui.OnscreenText import OnscreenText
 
 def mat4ToNumpyArray(mat):
@@ -44,42 +41,200 @@ def mat4ToNumpyArray(mat):
 def vec3ToNumpyArray(vec):
     return np.array([vec.x, vec.y, vec.z])
 
-class FirstPersonCamera(DirectObject):
-    '''
-    First person camera controller.
-    Adapted from: http://www.panda3d.org/forums/viewtopic.php?t=11657
-    '''
-    ##   First person camera controller, "free view"/"FPS" style.
-    #   
-    #    Simple camera mouse look and WASD key controller
-    #    shift to go faster,
-    #    r and f keys move camera up/down,
-    #    q and e keys rotate camera,
-    #    hit enter to start/stop controls.
-    #    If a refNode is specified, heading and up/down are performed wrt the
-    #    reference node (usually the root node of scene, i.e. base.render)
-    #    and camera behaves more similarly to an "FPS" camera.
-   
-    ## Constructor
-    # @param gameaApp: the game application to which this controller
-    # applies, that should be ShowBase derived.
-    # @param camera: the camera to which this controller applies
-    # @param refNode: reference node wrt heading and up/down are performed
-    def __init__(self, gameApp, camera, refNode=None):
-        '''
-        Constructor
-        '''
-       
-        self.gameApp = gameApp
-        self.camera = camera
-        if refNode != None:
-            self.refNode = refNode
-        else:
-            self.refNode = self.camera
-        self.running = False
+class Controller(ShowBase):
+
+    def __init__(self, scene, size=(800,600), zNear=0.1, zFar=1000.0, fov=40.0, shadowing=False, showPosition=False, cameraTransform=None):
+        ShowBase.__init__(self)
+
+        self.__dict__.update(scene=scene, size=size, fov=fov,
+                             zNear=zNear, zFar=zFar, shadowing=shadowing, showPosition=showPosition, cameraTransform=cameraTransform)
+        
+        # Find agent and reparent camera to it
+        self.agent = self.scene.scene.find('**/agents/agent*/+BulletRigidBodyNode')
+        self.camera.reparentTo(self.agent)
+        if self.cameraTransform is not None:
+            self.camera.setTransform(cameraTransform)
+        
+        lens = self.cam.node().getLens()
+        lens.setFov(self.fov)
+        lens.setNear(self.zNear)
+        lens.setFar(self.zFar)
+        
+        # Change window size
+        wp = WindowProperties()
+        wp.setSize(size[0], size[1])
+        wp.setTitle("Controller")
+        wp.setCursorHidden(True)
+        self.win.requestProperties(wp)
+        
+        self.disableMouse()
+        
         self.time = 0
-        self.centX = self.gameApp.win.getProperties().getXSize() / 2
-        self.centY = self.gameApp.win.getProperties().getYSize() / 2
+        self.centX = self.win.getProperties().getXSize() / 2
+        self.centY = self.win.getProperties().getYSize() / 2
+        self.win.movePointer(0, self.centX, self.centY)
+        
+        # key controls
+        self.forward = False
+        self.backward = False
+        self.fast = 1.0
+        self.left = False
+        self.right = False
+       
+        # sensitivity settings
+        self.movSens = 2
+        self.movSensFast = self.movSens * 5
+        self.sensX = self.sensY = 0.2       
+        
+        # Reparent the scene to render.
+        self.scene.scene.reparentTo(self.render)
+
+        # Task
+        self.globalClock = ClockObject.getGlobalClock()
+        self.taskMgr.add(self.update, 'controller-update')
+        
+        self._addDefaultLighting()
+        self._setupEvents()
+        
+    def _addDefaultLighting(self):
+        alight = AmbientLight('alight')
+        alight.setColor(VBase4(0.2, 0.2, 0.2, 1))
+        alnp = self.render.attachNewNode(alight)
+        self.render.setLight(alnp)
+        
+        #NOTE: Point light following the camera
+        plight = PointLight('plight')
+        plight.setColor(VBase4(0.4, 0.4, 0.4, 1))
+        plnp = self.cam.attachNewNode(plight)
+        self.render.setLight(plnp)
+        
+        if self.shadowing:
+            # Use a 512x512 resolution shadow map
+            plight.setShadowCaster(True, 512, 512)
+
+            # Enable the shader generator for the receiving nodes
+            self.render.setShaderAuto()
+            self.render.setAntialias(AntialiasAttrib.MAuto)
+        
+    def _setupEvents(self):
+        
+        self.escapeEventText = OnscreenText(text="ESC: Quit",
+                                style=1, fg=(1,1,1,1), pos=(-1.3, 0.95),
+                                align=TextNode.ALeft, scale = .05)
+  
+        if self.showPosition:
+            self.positionText = OnscreenText(text="Position: ",
+                                    style=1, fg=(1,1,1,1), pos=(-1.3, 0.85),
+                                    align=TextNode.ALeft, scale = .05)
+  
+            self.orientationText = OnscreenText(text="Orientation: ",
+                                    style=1, fg=(1,1,1,1), pos=(-1.3, 0.80),
+                                    align=TextNode.ALeft, scale = .05)
+  
+        #Set up the key input 
+        self.accept('escape', sys.exit)
+        self.accept("w", setattr, [self, "forward", True])
+        self.accept("w-up", setattr, [self, "forward", False])
+        self.accept("s", setattr, [self, "backward", True])
+        self.accept("s-up", setattr, [self, "backward", False])
+        self.accept("a", setattr, [self, "left", True])
+        self.accept("a-up", setattr, [self, "left", False])
+        self.accept("d", setattr, [self, "right", True])
+        self.accept("d-up", setattr, [self, "right", False])
+        self.accept("shift", setattr, [self, "fast", 10.0])
+        self.accept("shift-up", setattr, [self, "fast", 1.0])
+        
+    def update(self, task):
+        
+        #dt = self.globalClock.getDt()
+        dt = task.time - self.time
+         
+        # handle mouse look
+        md = self.win.getPointer(0)
+        x = md.getX()
+        y = md.getY()
+        
+        if self.win.movePointer(0, self.centX, self.centY):
+            self.agent.setH(self.agent, self.agent.getH(self.agent) - (x - self.centX) * self.sensX)
+            self.agent.setP(self.agent, self.agent.getP(self.agent) - (y - self.centY) * self.sensY)
+            self.agent.setR(0.0)
+
+        linearVelocityX = 0.0
+        linearVelocityY = 0.0
+
+        if self.forward == True:
+            linearVelocityY += self.movSens * self.fast
+        if self.backward == True:
+            linearVelocityY -= self.movSens * self.fast
+        if self.left == True:
+            linearVelocityX -= self.movSens * self.fast
+        if self.right == True:
+            linearVelocityX += self.movSens * self.fast
+            
+        linearVelocity = LVector3f(linearVelocityX, linearVelocityY, 0.0)
+           
+        # Apply the local transform to the velocity
+        # XXX: use BulletCharacterControllerNode class, which already handles local transform?
+        rotMat = self.agent.node().getTransform().getMat().getUpper3()
+        linearVelocity = rotMat.xformVec(linearVelocity)
+        linearVelocity.z = 0.0
+        self.agent.node().setLinearVelocity(linearVelocity)
+        
+        if self.showPosition:
+            position = self.agent.getNetTransform().getPos()
+            hpr = self.agent.getNetTransform().getHpr()
+            self.positionText.setText('Position: (x = %4.2f, y = %4.2f, z = %4.2f)' % (position.x, position.y, position.z))
+            self.orientationText.setText('Orientation: (h = %4.2f, p = %4.2f, r = %4.2f)' % (hpr.x, hpr.y, hpr.z))
+        
+        self.time = task.time
+        
+        # Simulate physics
+        if 'physics' in self.scene.worlds:
+            self.scene.worlds['physics'].step(dt)
+        
+        # Rendering
+        if 'render' in self.scene.worlds:
+            self.scene.worlds['render'].step(dt)
+        
+        # Simulate acoustics
+        if 'acoustics' in self.scene.worlds:
+            self.scene.worlds['acoustics'].step(dt)
+            
+        return task.cont
+    
+    def step(self):
+        self.taskMgr.step()
+                
+    def destroy(self):
+        self.taskMgr.remove('controller-update')
+        ShowBase.destroy(self)
+        
+class Viewer(ShowBase):
+
+    def __init__(self, scene, size=(800,600), zNear=0.1, zFar=1000.0, fov=40.0, shadowing=False, interactive=True,
+                 showPosition=False):
+        ShowBase.__init__(self)
+
+        self.__dict__.update(scene=scene, size=size, fov=fov, shadowing=shadowing,
+                             zNear=zNear, zFar=zFar, interactive=interactive, showPosition=showPosition)
+        
+        lens = self.cam.node().getLens()
+        lens.setFov(self.fov)
+        lens.setNear(self.zNear)
+        lens.setFar(self.zFar)
+        
+        # Change window size
+        wp = WindowProperties()
+        wp.setSize(size[0], size[1])
+        wp.setTitle("Viewer")
+        wp.setCursorHidden(True)
+        self.win.requestProperties(wp)
+        
+        self.disableMouse()
+        
+        self.time = 0
+        self.centX = self.win.getProperties().getXSize() / 2
+        self.centY = self.win.getProperties().getYSize() / 2
        
         # key controls
         self.forward = False
@@ -91,29 +246,45 @@ class FirstPersonCamera(DirectObject):
         self.down = False
         self.up = False
         self.down = False
-        self.rollLeft = False
-        self.rollRight = False
        
         # sensitivity settings
         self.movSens = 2
         self.movSensFast = self.movSens * 5
-        self.rollSens = 50
         self.sensX = self.sensY = 0.2       
        
-        self.gameApp.disableMouse()
-        self.camera.setP(self.refNode, 0)
-        self.camera.setR(self.refNode, 0)
-        
-        # hide mouse cursor, comment these 3 lines to see the cursor
-        props = WindowProperties()
-        props.setCursorHidden(True)
-        self.gameApp.win.requestProperties(props)
+        self.cam.setP(self.cam, 0)
+        self.cam.setR(0)
         
         # reset mouse to start position:
-        self.gameApp.win.movePointer(0, self.centX, self.centY)             
-        self.gameApp.taskMgr.add(self.cameraTask, 'HxMouseLook::cameraTask')       
+        self.win.movePointer(0, self.centX, self.centY)     
         
-        #Task for changing direction/position
+        # Reparent the scene to render.
+        self.scene.scene.reparentTo(self.render)
+
+        # Task
+        self.globalClock = ClockObject.getGlobalClock()
+        self.taskMgr.add(self.update, 'viewer-update')
+        
+        self._addDefaultLighting()
+        self._setupEvents()
+        
+    def _setupEvents(self):
+        
+        self.escapeEventText = OnscreenText(text="ESC: Quit",
+                                style=1, fg=(1,1,1,1), pos=(-1.3, 0.95),
+                                align=TextNode.ALeft, scale = .05)
+  
+        if self.showPosition:
+            self.positionText = OnscreenText(text="Position: ",
+                                    style=1, fg=(1,1,1,1), pos=(-1.3, 0.85),
+                                    align=TextNode.ALeft, scale = .05)
+  
+            self.orientationText = OnscreenText(text="Orientation: ",
+                                    style=1, fg=(1,1,1,1), pos=(-1.3, 0.80),
+                                    align=TextNode.ALeft, scale = .05)
+  
+        #Set up the key input 
+        self.accept('escape', sys.exit)
         self.accept("w", setattr, [self, "forward", True])
         self.accept("shift-w", setattr, [self, "forward", True])
         self.accept("w-up", setattr, [self, "forward", False])
@@ -132,92 +303,8 @@ class FirstPersonCamera(DirectObject):
         self.accept("f", setattr, [self, "down", True])
         self.accept("shift-f", setattr, [self, "down", True])
         self.accept("f-up", setattr, [self, "down", False])
-        self.accept("q", setattr, [self, "rollLeft", True])
-        self.accept("q-up", setattr, [self, "rollLeft", False])
-        self.accept("e", setattr, [self, "rollRight", True])
-        self.accept("e-up", setattr, [self, "rollRight", False])
         self.accept("shift", setattr, [self, "fast", 10.0])
         self.accept("shift-up", setattr, [self, "fast", 1.0])
-       
-    ## Camera rotation task
-    def cameraTask(self, task):
-        dt = task.time - self.time
-         
-        # handle mouse look
-        md = self.gameApp.win.getPointer(0)       
-        x = md.getX()
-        y = md.getY()
-         
-        if self.gameApp.win.movePointer(0, self.centX, self.centY):   
-            self.camera.setH(self.refNode, self.camera.getH(self.refNode)
-                             - (x - self.centX) * self.sensX)
-            self.camera.setP(self.camera, self.camera.getP(self.camera)
-                             - (y - self.centY) * self.sensY)       
-       
-        # handle keys:
-        if self.forward == True:
-            self.camera.setY(self.camera, self.camera.getY(self.camera)
-                             + self.movSens * self.fast * dt)
-        if self.backward == True:
-            self.camera.setY(self.camera, self.camera.getY(self.camera)
-                             - self.movSens * self.fast * dt)
-        if self.left == True:
-            self.camera.setX(self.camera, self.camera.getX(self.camera)
-                             - self.movSens * self.fast * dt)
-        if self.right == True:
-            self.camera.setX(self.camera, self.camera.getX(self.camera)
-                             + self.movSens * self.fast * dt)
-        if self.up == True:
-            self.camera.setZ(self.refNode, self.camera.getZ(self.refNode)
-                             + self.movSens * self.fast * dt)
-        if self.down == True:
-            self.camera.setZ(self.refNode, self.camera.getZ(self.refNode)
-                             - self.movSens * self.fast * dt)           
-        if self.rollLeft == True:
-            self.camera.setR(self.camera, self.camera.getR(self.camera)
-                             - self.rollSens * dt)
-        if self.rollRight == True:
-            self.camera.setR(self.camera, self.camera.getR(self.camera)
-                             + self.rollSens * dt)
-           
-        self.time = task.time       
-        return Task.cont
-
-class Viewer(ShowBase):
-
-    def __init__(self, scene, size=(800,600), interactive=True, shadowing=False):
-        ShowBase.__init__(self)
-
-        self.__dict__.update(scene=scene, size=size, interactive=interactive,
-                             shadowing=shadowing)
-        
-        # Change window size
-        wp = WindowProperties()
-        wp.setSize(size[0], size[1])
-        wp.setTitle("Viewer")
-        self.win.requestProperties(wp)
-        
-        # Reparent the scene to render.
-        self.scene.scene.reparentTo(self.render)
-
-        # Task
-        self.globalClock = ClockObject.getGlobalClock()
-        taskMgr.add(self.update, 'update')
-        
-        self._addDefaultLighting()
-        
-        if self.interactive:
-            self.setupEvents()
-            self.mouseLook = FirstPersonCamera(self, self.cam, self.scene.scene)
-        
-    def setupEvents(self):
-        
-        self.escapeEventText = OnscreenText(text="ESC: Quit",
-                                style=1, fg=(1,1,1,1), pos=(-1.3, 0.95),
-                                align=TextNode.ALeft, scale = .05)
-  
-        #Set up the key input 
-        self.accept('escape', sys.exit)
         
     def _addDefaultLighting(self):
         alight = AmbientLight('alight')
@@ -227,7 +314,7 @@ class Viewer(ShowBase):
         
         #NOTE: Point light following the camera
         plight = PointLight('plight')
-        plight.setColor(VBase4(1.0, 1.0, 1.0, 1))
+        plight.setColor(VBase4(0.9, 0.9, 0.9, 1))
         plnp = self.cam.attachNewNode(plight)
         self.render.setLight(plnp)
         
@@ -241,7 +328,50 @@ class Viewer(ShowBase):
         
     def update(self, task):
         
-        dt = self.globalClock.getDt()
+        #dt = self.globalClock.getDt()
+        dt = task.time - self.time
+         
+        if self.interactive:
+         
+            # handle mouse look
+            md = self.win.getPointer(0)       
+            x = md.getX()
+            y = md.getY()
+             
+            if self.win.movePointer(0, self.centX, self.centY):   
+                self.cam.setH(self.cam, self.cam.getH(self.cam)
+                                 - (x - self.centX) * self.sensX)
+                self.cam.setP(self.cam, self.cam.getP(self.cam)
+                                 - (y - self.centY) * self.sensY)       
+                self.cam.setR(0)
+                
+            # handle keys:
+            if self.forward == True:
+                self.cam.setY(self.cam, self.cam.getY(self.cam)
+                                 + self.movSens * self.fast * dt)
+            if self.backward == True:
+                self.cam.setY(self.cam, self.cam.getY(self.cam)
+                                 - self.movSens * self.fast * dt)
+            if self.left == True:
+                self.cam.setX(self.cam, self.cam.getX(self.cam)
+                                 - self.movSens * self.fast * dt)
+            if self.right == True:
+                self.cam.setX(self.cam, self.cam.getX(self.cam)
+                                 + self.movSens * self.fast * dt)
+            if self.up == True:
+                self.cam.setZ(self.cam, self.cam.getZ(self.cam)
+                                 + self.movSens * self.fast * dt)
+            if self.down == True:
+                self.cam.setZ(self.cam, self.cam.getZ(self.cam)
+                                 - self.movSens * self.fast * dt)           
+        
+        if self.showPosition:
+            position = self.cam.getNetTransform().getPos()
+            hpr = self.cam.getNetTransform().getHpr()
+            self.positionText.setText('Position: (x = %4.2f, y = %4.2f, z = %4.2f)' % (position.x, position.y, position.z))
+            self.orientationText.setText('Orientation: (h = %4.2f, p = %4.2f, r = %4.2f)' % (hpr.x, hpr.y, hpr.z))
+           
+        self.time = task.time       
         
         # Simulate physics
         if 'physics' in self.scene.worlds:
@@ -258,5 +388,9 @@ class Viewer(ShowBase):
         return task.cont
     
     def step(self):
-        taskMgr.step()
+        self.taskMgr.step()
+        
+    def destroy(self):
+        self.taskMgr.remove('viewer-update')
+        ShowBase.destroy(self)
         

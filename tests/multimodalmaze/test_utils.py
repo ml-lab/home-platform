@@ -29,6 +29,7 @@ import time
 import logging
 import numpy as np
 import unittest
+from multimodalmaze.env import BasicEnvironment
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
@@ -36,7 +37,8 @@ TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 
 from panda3d.core import LMatrix4f, LMatrix4, LVector3
 
 from multimodalmaze.suncg import SunCgSceneLoader
-from multimodalmaze.utils import Viewer, mat4ToNumpyArray, vec3ToNumpyArray
+from multimodalmaze.utils import Viewer, mat4ToNumpyArray, vec3ToNumpyArray,\
+    Controller
     
 class TestViewer(unittest.TestCase):
     
@@ -66,7 +68,25 @@ class TestViewer(unittest.TestCase):
         
         finally:
             viewer.destroy()
-            viewer.graphicsEngine.removeAllWindows()
+
+class TestController(unittest.TestCase):
+    
+    def testStep(self):
+        
+        try:
+            env = BasicEnvironment(houseId="0004d52d1aeeb8ae6de39d6bd993e992", suncgDatasetRoot=TEST_SUNCG_DATA_DIR, realtime=True)
+            env.setAgentOrientation((60.0, 0.0, 0.0))
+            env.setAgentPosition((42, -39, 1.1))
+            
+            controller = Controller(env.scene, showPosition=True)
+            
+            for _ in range(10):
+                controller.step()
+            time.sleep(1.0)
+            
+        finally:
+            env.destroy()
+            controller.destroy()
 
 class TestFunctions(unittest.TestCase):
     

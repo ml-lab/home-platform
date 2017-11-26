@@ -222,11 +222,15 @@ class Panda3dBulletPhysics(World):
             # Constrain the agent to have fixed position on the Z-axis
             node.setLinearFactor(Vec3(1.0, 1.0, 0.0))
     
-            # Constrain the agent to have rotation around the Z-axis only
-            node.setAngularFactor(Vec3(0.0, 0.0, 1.0))
+            # Constrain the agent not to be affected by rotations
+            node.setAngularFactor(Vec3(0.0, 0.0, 0.0))
             
             node.setIntoCollideMask(BitMask32.allOn())
             node.setDeactivationEnabled(True)
+            
+            # Enable continuous collision detection (CCD)
+            node.setCcdMotionThreshold(1e-7)
+            node.setCcdSweptSphereRadius(0.50)
             
             if node.isStatic():
                 agent.setTag('physics-mode', 'static')
@@ -266,7 +270,6 @@ class Panda3dBulletPhysics(World):
                 node.setRestitution(self.defaultMaterialRestitution)
                 node.setIntoCollideMask(BitMask32.allOn())
                 node.setDeactivationEnabled(True)
-                self.bulletWorld.attach(node)
                 
                 if self.suncgDatasetRoot is not None:
                     
@@ -304,7 +307,10 @@ class Panda3dBulletPhysics(World):
                     acousticsNp.reparentTo(physicsNp)
                 
                 # NOTE: we need this to update the transform state of the internal bullet node
-                physicsNp.node().setTransformDirty()
+                node.setTransformDirty()
+                
+                # NOTE: we need to add the node to the bullet engine only after setting all attributes
+                self.bulletWorld.attach(node)
                 
                 # Validation
                 assert np.allclose(mat4ToNumpyArray(physicsNp.getNetTransform().getMat()),
@@ -324,10 +330,44 @@ class Panda3dBulletPhysics(World):
                 isCollisionDetected = True
         else:
             for nodePath in root.findAllMatches('**/+BulletBodyNode'):
-                result = self.bulletWorld.contactTest(nodePath.node())
-                if result.getNumContacts() > 0:
-                    isCollisionDetected = True
+                isCollisionDetected |= self.isCollision(nodePath)
         return isCollisionDetected
+
+    def getCollisionInfo(self, root, dt):
+        
+        result = self.bulletWorld.contactTest(root.node())
+        
+        force = 0.0
+        relativePosition = LVecBase3f(0.0, 0.0, 0.0)
+        isCollisionDetected = False
+        for _ in result.getContacts():
+        
+            # Iterate over all manifolds of the world
+            # NOTE: it seems like the contact manifold doesn't hold the information
+            #       to calculate contact force. We need the persistent manifolds for that.
+            for manifold in self.bulletWorld.getManifolds():
+                
+                # Check if the root node is part of that manifold, by checking positions
+                # TODO: there is surely a better way to compare the two nodes here
+                #if (manifold.getNode0().getTransform().getPos() == root.getNetTransform().getPos()):
+                if manifold.getNode0().getTag('model-id') == root.getTag('model-id'):
+                    
+                    # Calculate the to
+                    totalImpulse = 0.0
+                    maxImpulse = 0.0
+                    for pt in manifold.getManifoldPoints():
+                        impulse = pt.getAppliedImpulse()
+                        totalImpulse += impulse
+                        
+                        if impulse > maxImpulse:
+                            maxImpulse = impulse
+                            relativePosition = pt.getLocalPointA()
+                    
+                    force = totalImpulse / dt
+                    isCollisionDetected = True
+          
+        return force, relativePosition, isCollisionDetected
+        
 
     def calculate2dNavigationMap(self, agent, z=0.1, precision=0.1, yup=True):
     

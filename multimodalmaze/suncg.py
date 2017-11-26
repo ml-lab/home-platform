@@ -32,8 +32,7 @@ import logging
 import numpy as np
 
 from panda3d.core import NodePath, Loader, LoaderOptions, Filename, TransformState,\
-    LMatrix4f, Spotlight, VBase4, LVector3f, PointLight, PerspectiveLens,\
-    DirectionalLight, CS_zup_right, CS_yup_right, LVector4f
+    LMatrix4f, Spotlight, LVector3f, PointLight, PerspectiveLens, CS_zup_right, CS_yup_right
 
 from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
 from multimodalmaze.core import Scene
@@ -418,6 +417,7 @@ class SunCgSceneLoader(object):
                     # Create new node for object instance
                     objectNp = NodePath('object-' + str(modelId) + '-' + str(objectIds[modelId]))
                     
+                    #TODO: loading the BAM format would be much more efficient
                     # Convert extension from OBJ + MTL to EGG format
                     objFilename = os.path.join(datasetRoot, 'object', node['modelId'], node['modelId'] + '.obj')
                     assert os.path.exists(objFilename)

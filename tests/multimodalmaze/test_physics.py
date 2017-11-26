@@ -82,7 +82,7 @@ class TestPanda3dBulletPhysics(unittest.TestCase):
             renderer = Panda3dRenderer(scene, shadowing=False)
             physics = Panda3dBulletPhysics(scene, debug=True)
             
-            viewer = Viewer(scene)
+            viewer = Viewer(scene, interactive=False)
             viewer.disableMouse()
     
             viewer.cam.setTransform(TransformState.makePos(LVecBase3(5.0, 0.0, 0.0)))
@@ -105,7 +105,7 @@ class TestPanda3dBulletPhysics(unittest.TestCase):
             
             physics = Panda3dBulletPhysics(scene, suncgDatasetRoot=TEST_SUNCG_DATA_DIR, debug=True)
             
-            viewer = Viewer(scene)
+            viewer = Viewer(scene, interactive=False)
             viewer.disableMouse()
              
             mat = np.array([0.999992, 0.00394238, 0, 0,
@@ -129,12 +129,12 @@ class TestPanda3dBulletPhysics(unittest.TestCase):
         try:
             scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
             
-            renderer = Panda3dRenderer(scene, shadowing=False, showCeiling=False, mode='offscreen')
+            renderer = Panda3dRenderer(scene, shadowing=False, mode='offscreen')
             renderer.showRoomLayout(showCeilings=False)
         
             physics = Panda3dBulletPhysics(scene, suncgDatasetRoot=TEST_SUNCG_DATA_DIR, debug=True)
             
-            viewer = Viewer(scene)
+            viewer = Viewer(scene, interactive=False)
             viewer.disableMouse()
              
             mat = np.array([0.999992, 0.00394238, 0, 0,
@@ -185,7 +185,7 @@ class TestPanda3dBulletPhysics(unittest.TestCase):
             agent.node().setAngularVelocity(LVector3f(0,0,1))
             agent.node().setActive(True)
              
-            viewer = Viewer(scene)
+            viewer = Viewer(scene, interactive=False)
             viewer.disableMouse()
              
             mat = np.array([1, 0, 0, 0,
