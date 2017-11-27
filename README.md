@@ -1,5 +1,5 @@
 # HoME Platform
-Household Multimmodal Environment (HoME) based on the SUNCG indoor scenes dataset.
+Household multimmodal environment (HoME) based on the SUNCG indoor scenes dataset.
 
 ![alt tag](https://github.com/IGLU-CHISTERA/multimodal-maze/raw/master/doc/images/multimodalmaze.jpg)
 
@@ -28,12 +28,12 @@ Download the source code from the git repository:
 ```
 mkdir -p $HOME/work
 cd $HOME/work
-git clone https://github.com/IGLU-CHISTERA/multimodal-maze.git
+git clone https://github.com/HoME-Platform/home-platform.git
 ```
 
 Note that the library must be in the PYTHONPATH environment variable for Python to be able to find it:
 ```
-export PYTHONPATH=$HOME/work/multimodal-maze:$PYTHONPATH 
+export PYTHONPATH=$HOME/work/home-platform:$PYTHONPATH 
 ```
 This can also be added at the end of the configuration file $HOME/.bashrc
 
@@ -41,7 +41,7 @@ This can also be added at the end of the configuration file $HOME/.bashrc
 
 To ensure all libraries where correctly installed, it is advised to run the test suite:
 ```
-cd $HOME/work/multimodal-maze/tests
+cd $HOME/work/home-platform/tests
 ./run_tests.sh
 ```
 Note that this can take some time.
