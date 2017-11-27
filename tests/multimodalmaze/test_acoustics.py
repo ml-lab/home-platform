@@ -32,14 +32,14 @@ import numpy as np
 import unittest
 import matplotlib.pyplot as plt
 from panda3d.core import TransformState, LVecBase3f, LMatrix4f
-from multimodalmaze.suncg import SunCgSceneLoader, loadModel
-from multimodalmaze.core import Scene
-from multimodalmaze.utils import Viewer
+from home_platform.suncg import SunCgSceneLoader, loadModel
+from home_platform.core import Scene
+from home_platform.utils import Viewer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.acoustics import EvertAcoustics, CipicHRTF, FilterBank, \
+from home_platform.acoustics import EvertAcoustics, CipicHRTF, FilterBank, \
                                      MaterialAbsorptionTable, AirAttenuationTable
 
 class TestMaterialAbsorptionTable(unittest.TestCase):

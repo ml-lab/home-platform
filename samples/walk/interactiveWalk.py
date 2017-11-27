@@ -30,8 +30,8 @@ import os
 import sys
 import logging
 
-from multimodalmaze.env import BasicEnvironment
-from multimodalmaze.utils import Controller
+from home_platform.env import BasicEnvironment
+from home_platform.utils import Controller
 
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "tests", "data", "suncg")
 

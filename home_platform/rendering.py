@@ -38,7 +38,7 @@ from panda3d.core import VBase4, PointLight, AmbientLight, AntialiasAttrib, \
 from panda3d.core import GraphicsEngine, GraphicsPipeSelection, Loader, RescaleNormalAttrib, \
                          Texture, GraphicsPipe, GraphicsOutput, FrameBufferProperties, WindowProperties, Camera, PerspectiveLens, ModelNode
 
-from multimodalmaze.core import World
+from home_platform.core import World
 
 logger = logging.getLogger(__name__)
 

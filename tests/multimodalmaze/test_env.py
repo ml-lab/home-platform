@@ -33,7 +33,7 @@ import unittest
 
 import matplotlib.pyplot as plt
 
-from multimodalmaze.env import BasicEnvironment
+from home_platform.env import BasicEnvironment
 from panda3d.core import LVector3f
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")

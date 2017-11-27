@@ -30,10 +30,10 @@ import numpy as np
 
 from string import digits
 
-from multimodalmaze.constants import MATERIAL_TABLE, MATERIAL_COLOR_TABLE
-from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation,\
+from home_platform.constants import MATERIAL_TABLE, MATERIAL_COLOR_TABLE
+from home_platform.suncg import ModelCategoryMapping, ModelInformation,\
     ObjectVoxelData
-from multimodalmaze.rendering import getColorAttributesFromModel
+from home_platform.rendering import getColorAttributesFromModel
 
 logger = logging.getLogger(__name__)
 

@@ -30,10 +30,10 @@ import logging
 import numpy as np
 import matplotlib.pyplot as plt
 
-from multimodalmaze.core import House, Agent, Object
-from multimodalmaze.rendering import Panda3dRenderWorld
-from multimodalmaze.acoustics import EvertAcousticWorld
-from multimodalmaze.semantic import SuncgSemanticWorld
+from home_platform.core import House, Agent, Object
+from home_platform.rendering import Panda3dRenderWorld
+from home_platform.acoustics import EvertAcousticWorld
+from home_platform.semantic import SuncgSemanticWorld
 
 CDIR = os.path.dirname(os.path.realpath(__file__))
 

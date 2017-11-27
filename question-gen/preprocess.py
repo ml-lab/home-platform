@@ -1,9 +1,9 @@
 import json
 import os
 
-from multimodalmaze.core import House
-from multimodalmaze.rendering import Panda3dRenderWorld
-from multimodalmaze.semantic import SuncgSemanticWorld, MaterialColorTable, MaterialTable
+from home_platform.core import House
+from home_platform.rendering import Panda3dRenderWorld
+from home_platform.semantic import SuncgSemanticWorld, MaterialColorTable, MaterialTable
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tests/data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "tests/data", "suncg")

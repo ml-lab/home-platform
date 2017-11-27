@@ -33,8 +33,8 @@ from panda3d.core import NodePath
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.semantic import MaterialColorTable, SuncgSemantics, MaterialTable, DimensionTable
-from multimodalmaze.suncg import loadModel, SunCgSceneLoader
+from home_platform.semantic import MaterialColorTable, SuncgSemantics, MaterialTable, DimensionTable
+from home_platform.suncg import loadModel, SunCgSceneLoader
     
 class TestMaterialColorTable(unittest.TestCase):
     

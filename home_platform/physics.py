@@ -33,9 +33,9 @@ from panda3d.core import Vec3, NodePath, BitMask32, TransformState, LVecBase3f
 from panda3d.bullet import BulletWorld, BulletTriangleMesh, BulletRigidBodyNode, BulletBoxShape, BulletTriangleMeshShape, \
                             BulletDebugNode, BulletCapsuleShape, BulletConvexHullShape
 
-from multimodalmaze.core import World
-from multimodalmaze.suncg import ObjectVoxelData, ModelCategoryMapping
-from multimodalmaze.utils import mat4ToNumpyArray
+from home_platform.core import World
+from home_platform.suncg import ObjectVoxelData, ModelCategoryMapping
+from home_platform.utils import mat4ToNumpyArray
 
 logger = logging.getLogger(__name__)
                 

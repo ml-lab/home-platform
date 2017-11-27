@@ -2,9 +2,9 @@ from direct.showbase.ShowBase import ShowBase, Vec3, Mat4
 from direct.task.TaskManagerGlobal import taskMgr
 import matplotlib.pyplot as plt
 
-from multimodalmaze.core import House, Agent
-from multimodalmaze.physics import Panda3dBulletPhysicWorld
-from multimodalmaze.rendering import Panda3dRenderWorld
+from home_platform.core import House, Agent
+from home_platform.physics import Panda3dBulletPhysicWorld
+from home_platform.rendering import Panda3dRenderWorld
 import os
 import numpy as np
 import time

@@ -34,9 +34,9 @@ import numpy as np
 from panda3d.core import NodePath, Loader, LoaderOptions, Filename, TransformState,\
     LMatrix4f, Spotlight, LVector3f, PointLight, PerspectiveLens, CS_zup_right, CS_yup_right
 
-from multimodalmaze.constants import MODEL_CATEGORY_MAPPING
-from multimodalmaze.core import Scene
-from multimodalmaze.utils import mat4ToNumpyArray
+from home_platform.constants import MODEL_CATEGORY_MAPPING
+from home_platform.core import Scene
+from home_platform.utils import mat4ToNumpyArray
 
 logger = logging.getLogger(__name__)
 

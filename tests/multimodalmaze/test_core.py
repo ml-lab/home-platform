@@ -32,8 +32,8 @@ import unittest
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.core import Scene
-from multimodalmaze.suncg import loadModel
+from home_platform.core import Scene
+from home_platform.suncg import loadModel
                 
 class TestScene(unittest.TestCase):
     

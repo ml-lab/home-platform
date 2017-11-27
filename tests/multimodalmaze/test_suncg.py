@@ -29,14 +29,14 @@ import time
 import logging
 import numpy as np
 import unittest
-from multimodalmaze.core import Scene
+from home_platform.core import Scene
 from panda3d.core import TransformState, LVector3f
-from multimodalmaze.utils import Viewer
+from home_platform.utils import Viewer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.suncg import ModelCategoryMapping, ModelInformation, ObjectVoxelData,\
+from home_platform.suncg import ModelCategoryMapping, ModelInformation, ObjectVoxelData,\
     SunCgSceneLoader, SunCgModelLights, loadModel
 
 class TestModelCategoryMapping(unittest.TestCase):

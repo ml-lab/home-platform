@@ -32,8 +32,8 @@ import logging
 import numpy as np
 from matplotlib import pyplot as plt
 
-from multimodalmaze.core import House
-from multimodalmaze.env import BasicEnvironment
+from home_platform.core import House
+from home_platform.env import BasicEnvironment
 
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "tests", "data", "suncg")
 

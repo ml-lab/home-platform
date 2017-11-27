@@ -37,10 +37,10 @@ from evert import Room as EvertRoom
 from evert import Source, Listener, Vector3, Matrix3, Polygon, PathSolution
 from evert import Viewer as EvertViewer
 
-from multimodalmaze.core import World
-from multimodalmaze.suncg import loadModel
-from multimodalmaze.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
-from multimodalmaze.utils import vec3ToNumpyArray
+from home_platform.core import World
+from home_platform.suncg import loadModel
+from home_platform.rendering import get3DTrianglesFromModel, getColorAttributesFromModel
+from home_platform.utils import vec3ToNumpyArray
 
 from panda3d.core import NodePath, LVector3f, LVecBase3, Material, TransformState, AudioSound, VBase3, CS_zup_right,\
     ClockObject

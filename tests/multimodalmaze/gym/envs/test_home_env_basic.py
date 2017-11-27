@@ -39,7 +39,7 @@ class Test(unittest.TestCase):
 
     def testMake(self):
 
-        import multimodalmaze.gym  # to make the environment available in gym.make()
+        import home_platform.gym  # to make the environment available in gym.make()
 
         env = gym.make("Home-v0")
         env.reset()

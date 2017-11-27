@@ -1,5 +1,5 @@
-# Multimodal maze
-Multimodal maze environment based on the SUNCG indoor scenes dataset.
+# HoME Platform
+Household Multimmodal Environment (HoME) based on the SUNCG indoor scenes dataset.
 
 ![alt tag](https://github.com/IGLU-CHISTERA/multimodal-maze/raw/master/doc/images/multimodalmaze.jpg)
 

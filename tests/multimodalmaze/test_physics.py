@@ -32,13 +32,13 @@ import unittest
 
 import matplotlib.pyplot as plt
 
-from multimodalmaze.physics import Panda3dBulletPhysics
+from home_platform.physics import Panda3dBulletPhysics
 
-from multimodalmaze.suncg import SunCgSceneLoader, loadModel
-from multimodalmaze.utils import Viewer
+from home_platform.suncg import SunCgSceneLoader, loadModel
+from home_platform.utils import Viewer
 from panda3d.core import LMatrix4f, LVector3f, TransformState, LVecBase3
-from multimodalmaze.core import Scene
-from multimodalmaze.rendering import Panda3dRenderer
+from home_platform.core import Scene
+from home_platform.rendering import Panda3dRenderer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")

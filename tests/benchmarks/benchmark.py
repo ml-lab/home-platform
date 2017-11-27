@@ -27,8 +27,8 @@
 import os
 import numpy as np
 
-from multimodalmaze.env import BasicEnvironment
-from multimodalmaze.core import House
+from home_platform.env import BasicEnvironment
+from home_platform.core import House
 
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 

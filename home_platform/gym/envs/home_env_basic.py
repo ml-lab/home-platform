@@ -6,8 +6,8 @@ import numpy as np
 import Tkinter as tk
 import ImageTk
 
-from multimodalmaze.env import BasicEnvironment
-from multimodalmaze.suncg import data_dir
+from home_platform.env import BasicEnvironment
+from home_platform.suncg import data_dir
 
 
 class HomeEnv(gym.Env):

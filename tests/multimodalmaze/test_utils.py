@@ -29,15 +29,15 @@ import time
 import logging
 import numpy as np
 import unittest
-from multimodalmaze.env import BasicEnvironment
+from home_platform.env import BasicEnvironment
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
 from panda3d.core import LMatrix4f, LMatrix4, LVector3
 
-from multimodalmaze.suncg import SunCgSceneLoader
-from multimodalmaze.utils import Viewer, mat4ToNumpyArray, vec3ToNumpyArray,\
+from home_platform.suncg import SunCgSceneLoader
+from home_platform.utils import Viewer, mat4ToNumpyArray, vec3ToNumpyArray,\
     Controller
     
 class TestViewer(unittest.TestCase):

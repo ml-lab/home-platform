@@ -28,12 +28,12 @@ import heapq
 import logging
 import numpy as np
 
-from multimodalmaze.suncg import SunCgSceneLoader
-from multimodalmaze.rendering import Panda3dRenderer
-from multimodalmaze.physics import Panda3dBulletPhysics
+from home_platform.suncg import SunCgSceneLoader
+from home_platform.rendering import Panda3dRenderer
+from home_platform.physics import Panda3dBulletPhysics
 
 from panda3d.core import ClockObject, LVector3f, TransformState
-from multimodalmaze.utils import vec3ToNumpyArray
+from home_platform.utils import vec3ToNumpyArray
 
 logger = logging.getLogger(__name__)
 

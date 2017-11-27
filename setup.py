@@ -11,7 +11,7 @@ setup(
     license = "BSD 3-Clause License",
     keywords = "artificial intelligence, machine learning, reinforcement learning",
     url = "https://github.com/IGLU-CHISTERA/multimodal-maze",
-    packages=['multimodalmaze'],
+    packages=['home_platform'],
     setup_requires=['setuptools-markdown'],
     install_requires=[
         "setuptools-markdown",
