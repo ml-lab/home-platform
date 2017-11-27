@@ -3,14 +3,14 @@
 from setuptools import setup
 
 setup(
-    name = "Multimodal maze",
+    name = "HoME Platform",
     version = "0.1.0",
     author = "Simon Brodeur",
-    author_email = "Simon.Brodeur@USherbrooke.ca",
-    description = ("Multimodal maze environment based on the SUNCG indoor scenes dataset."),
+    author_email = "simon.brodeur@usherbrooke.ca",
+    description = ("Househole multimodal environment (HoME) based on the SUNCG indoor scenes dataset."),
     license = "BSD 3-Clause License",
     keywords = "artificial intelligence, machine learning, reinforcement learning",
-    url = "https://github.com/IGLU-CHISTERA/multimodal-maze",
+    url = "https://github.com/HoME-Platform/home-platform",
     packages=['home_platform'],
     setup_requires=['setuptools-markdown'],
     install_requires=[
