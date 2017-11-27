@@ -32,39 +32,76 @@ import unittest
 
 import matplotlib.pyplot as plt
 
-from multimodalmaze.core import House, Object, Agent
-from multimodalmaze.rendering import Panda3dRenderWorld
+from multimodalmaze.rendering import Panda3dRenderer
+from multimodalmaze.suncg import SunCgSceneLoader, loadModel, SunCgModelLights
+from panda3d.core import LMatrix4f, TransformState, LVecBase3
+from multimodalmaze.core import Scene
+from multimodalmaze.utils import Viewer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-class TestHouse(unittest.TestCase):
+class TestPanda3dRenderer(unittest.TestCase):
     
-    #FIXME: find out why not working correctly with shadowing (shaders)
-    def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
-    
-    def tearDown(self):
-        self.render.destroy()
-    
-    def testRender(self):
+    def testObjectWithViewer(self):
         
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
+        scene = Scene()
+        
+        modelId = '83'
+        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
+        assert os.path.exists(modelFilename)
+        model = loadModel(modelFilename)
+        model.setName('model-' + str(modelId))
+        model.hide()
+        
+        objectsNp = scene.scene.attachNewNode('objects')
+        objNp = objectsNp.attachNewNode('object-' + str(modelId))
+        model.reparentTo(objNp)
+        
+        # Calculate the center of this object
+        minBounds, maxBounds = model.getTightBounds()
+        centerPos = minBounds + (maxBounds - minBounds) / 2.0
+         
+        # Add offset transform to make position relative to the center
+        model.setTransform(TransformState.makePos(-centerPos))
 
-        self.render.addHouseToScene(house)
-        self.render.addDefaultLighting()
+        try:
+            renderer = Panda3dRenderer(scene, shadowing=False)
+            
+            viewer = Viewer(scene, interactive=False)
+            viewer.disableMouse()
+    
+            viewer.cam.setTransform(TransformState.makePos(LVecBase3(5.0, 0.0, 0.0)))
+            viewer.cam.lookAt(model)
+            
+            for _ in range(20):
+                viewer.step()
+            time.sleep(1.0)
+            
+        finally:
+            renderer.destroy()
+            viewer.destroy()
+            viewer.graphicsEngine.removeAllWindows()
+    
+    def testStep(self):
+        
+        scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
+        
+        modelLightsInfo = SunCgModelLights(os.path.join(TEST_SUNCG_DATA_DIR, 'metadata', 'suncgModelLights.json'))
+        renderer = Panda3dRenderer(scene, shadowing=True, mode='offscreen', modelLightsInfo=modelLightsInfo)
+        renderer.showRoomLayout(showCeilings=False)
         
         mat = np.array([0.999992, 0.00394238, 0, 0,
                         -0.00295702, 0.750104, -0.661314, 0,
                         -0.00260737, 0.661308, 0.75011, 0,
                         43.621, -55.7499, 12.9722, 1])
-        self.render.setCamera(mat)
-        self.render.step()
-        image = self.render.getRgbImage()
-        depth = self.render.getDepthImage(mode='distance')
-        self.assertTrue(np.min(depth) >= self.render.zNear)
-        self.assertTrue(np.max(depth) <= self.render.zFar)
+        scene.agents[0].setMat(LMatrix4f(*mat.ravel()))
+        
+        renderer.step(dt=0.1)
+        image = renderer.getRgbImages()['agent-0']
+        depth = renderer.getDepthImages(mode='distance')['agent-0']
+        self.assertTrue(np.min(depth) >= renderer.zNear)
+        self.assertTrue(np.max(depth) <= renderer.zFar)
         
         fig = plt.figure(figsize=(16,8))
         plt.axis("off")
@@ -76,122 +113,7 @@ class TestHouse(unittest.TestCase):
         time.sleep(1.0)
         plt.close(fig)
         
-class TestRoom(unittest.TestCase):
-    
-    def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
-    
-    def tearDown(self):
-        self.render.destroy()
-    
-    def testRender(self):
-        
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
-        room = house.rooms[1]
-        self.assertTrue(room.instanceId == 'fr_0rm_1')
-        self.assertTrue(len(room.objects) == 18)
-        
-        self.render.addRoomToScene(room)
-        self.render.addDefaultLighting()
-        
-        mat = np.array([0.999992, 0.00394238, 0, 0,
-                        -0.00295702, 0.750104, -0.661314, 0,
-                        -0.00260737, 0.661308, 0.75011, 0,
-                        43.621, -55.7499, 12.9722, 1])
-        self.render.setCamera(mat)
-        self.render.step()
-        image = self.render.getRgbImage()
-        depth = self.render.getDepthImage()
-        
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(121)
-        ax.imshow(image)
-        ax = plt.subplot(122)
-        ax.imshow(depth, cmap='binary')
-        plt.show(block=False)
-        time.sleep(1.0)
-        plt.close(fig)
-        
-class TestObject(unittest.TestCase):
-    
-    def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
-    
-    def tearDown(self):
-        self.render.destroy()
-    
-    def testRender(self):
-        
-        modelId = '83'
-        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
-        assert os.path.exists(modelFilename)
-        instanceId = str(modelId) + '-0'
-        obj = Object(instanceId, modelId, modelFilename)
-        
-        self.render.addObjectToScene(obj)
-        obj.setPosition((0,0,0))
-        
-        self.render.addDefaultLighting()
-        
-        mat = np.array([1, 0, 0, 0,
-                        0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        0, -5, 0, 1])
-        self.render.setCamera(mat)
-        self.render.step()
-        image = self.render.getRgbImage()
-        depth = self.render.getDepthImage()
-        
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(121)
-        ax.imshow(image)
-        ax = plt.subplot(122)
-        ax.imshow(depth, cmap='binary')
-        plt.show(block=False)
-        time.sleep(1.0)
-        plt.close(fig)
-        
-class TestAgent(unittest.TestCase):
-    
-    def setUp(self):
-        self.render = Panda3dRenderWorld(shadowing=False, showCeiling=False, mode='offscreen')
-        
-    def tearDown(self):
-        self.render.destroy()
-    
-    def testRender(self):
-        
-        modelFilename = os.path.join(TEST_DATA_DIR, "models", "sphere.egg")
-        assert os.path.exists(modelFilename)
-        agent = Agent('agent-0', modelFilename)
-        
-        self.render.addAgentToScene(agent)
-        agent.renderInstance.nodePath.setColor(1,0,0,1)
-        agent.setPosition((0,0,0))
-        
-        self.render.addDefaultLighting()
-        
-        mat = np.array([1, 0, 0, 0,
-                        0, 1, 0, 0,
-                        0, 0, 1, 0,
-                        0, -5, 0, 1])
-        self.render.setCamera(mat)
-        self.render.step()
-        image = self.render.getRgbImage()
-        depth = self.render.getDepthImage()
-        
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(121)
-        ax.imshow(image)
-        ax = plt.subplot(122)
-        ax.imshow(depth, cmap='binary')
-        plt.show(block=False)
-        time.sleep(1.0)
-        plt.close(fig)
+        renderer.destroy()
         
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

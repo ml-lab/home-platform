@@ -1,13 +1,11 @@
 import gym
 from gym import spaces
 import numpy as np
-import os
 
 # for displaying the rendering
 import Tkinter as tk
 import ImageTk
 
-from multimodalmaze.core import House
 from multimodalmaze.env import BasicEnvironment
 from multimodalmaze.suncg import data_dir
 
@@ -107,7 +105,7 @@ class HomeEnv(gym.Env):
             raise Exception("Received unknown 'looking' action: {}. "
                             "Try an integer in the range between and including 0-4.".format(action))
 
-        self.env.agent.setOrientation(new_orientation)
+        self.env.setAgentOrientation(new_orientation)
 
     def executeMoving(self, action):
         new_impulse = [0.0, 0.0, 0.0]  # impulse = force * time
@@ -127,8 +125,7 @@ class HomeEnv(gym.Env):
                             "Try an integer in the range between and including 0-4.".format(action))
 
         print ("new impulse:", new_impulse)
-        self.env.agent.addLinearImpulse(new_impulse)
-        # self.env.physicWorld.move_agent(new_impulse)
+        self.env.applyImpulseToAgent(new_impulse)
 
     def _step(self, action):
         assert self.action_space.contains(action)
@@ -151,20 +148,13 @@ class HomeEnv(gym.Env):
         # so we don't have to recreate the Panda3dBulletPhysicWorld
         # and Panda3dRenderWorld on every reset
 
-        # load a new empty physics and render world
-        self.env = BasicEnvironment()
-        # self.agent = self.env.agent
-
-        # load the house into the world
-        houseFilename = House.getJsonPath(
-            self.data_path,
-            self.list_of_houses[self.next_house])
-        house = House.loadFromJson(houseFilename, self.data_path)
-        self.env.loadHouse(house)
+        # load a new house into the world
+        houseId = self.list_of_houses[self.next_house]
+        self.env = BasicEnvironment(houseId, suncgDatasetRoot=self.data_path)
 
         # TODO move agent to random pos and orientation
-        self.env.agent.setPosition((42, -39, 1))
-        self.env.agent.setOrientation((0.0, 0.0, 0.0))
+        self.env.setAgentPosition((42, -39, 1))
+        self.env.setAgentOrientation((0.0, 0.0, 0.0))
 
         self.env.step()  # need a single step to create rendering in RAM
         self.observation = self.env.getObservation().as_dict()
@@ -179,7 +169,7 @@ class HomeEnv(gym.Env):
 
     def _create_window(self):
         self.render_window = tk.Tk()
-        image = np.zeros(self.env.renderWorld.size)
+        image = np.zeros(self.env.size)
         img = ImageTk.Image.fromarray(image)
         imgTk = ImageTk.PhotoImage(img)
 
@@ -207,22 +197,3 @@ class HomeEnv(gym.Env):
                 self._create_window()
 
             self._update_human_render()
-
-
-if __name__ == '__main__':
-    import multimodalmaze.gym  # to make the environment available in gym.make()
-    import time
-
-    env = gym.make("Home-v0")
-    env.reset()
-
-    env.render("human")
-
-    for i in range(20):
-        action = env.action_space.sample()
-        print ("action:", action)
-
-        obs, rew, done, misc = env.step(action)
-        env.render("human")
-        time.sleep(.5)
-        # print ("obs:", obs, "rew:", rew, "done:", done, "misc:", misc)

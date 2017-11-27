@@ -9,7 +9,7 @@
 #  - Redistributions in binary form must reproduce the above copyright notice, 
 #    this list of conditions and the following disclaimer in the documentation 
 #    and/or other materials provided with the distribution.
-#  - Neither the name of the copyright holder nor the names of its contributors 
+#  - Neither the name of the NECOTIS research group nor the names of its contributors 
 #    may be used to endorse or promote products derived from this software 
 #    without specific prior written permission.
 # 
@@ -25,33 +25,33 @@
 # POSSIBILITY OF SUCH DAMAGE.
 
 import os
-import logging
-import numpy as np
 import unittest
+import numpy as np
+import logging
+import gym
 
-TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
-TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
+# NOTE: use the test SUNCG data directory
+TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "data")
+TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "..", "..", "data", "suncg")
+os.environ['SUNCG_DATA_DIR'] = TEST_SUNCG_DATA_DIR
 
-from multimodalmaze.core import Scene
-from multimodalmaze.suncg import loadModel
-                
-class TestScene(unittest.TestCase):
+class Test(unittest.TestCase):
+
+    def testMake(self):
+
+        import multimodalmaze.gym  # to make the environment available in gym.make()
+
+        env = gym.make("Home-v0")
+        env.reset()
     
-    def testInit(self):
-        
-        scene = Scene()
-        
-        # Load object to scene
-        modelId = '126'
-        modelFilename = os.path.join(TEST_SUNCG_DATA_DIR, "object", str(modelId), str(modelId) + ".egg")
-        assert os.path.exists(modelFilename)
-        model = loadModel(modelFilename)
-        model.setName('object-' + str(modelId))
-        model.reparentTo(scene.scene)
-
-        self.assertTrue(scene.getTotalNbHouses() == 0)
-        self.assertTrue(scene.getTotalNbRooms() == 0)
-        self.assertTrue(scene.getTotalNbObjects() == 1)
+        env.render("human")
+    
+        for _ in range(20):
+            action = env.action_space.sample()
+            print ("action:", action)
+    
+            obs, rew, done, misc = env.step(action)
+            env.render("human")
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)

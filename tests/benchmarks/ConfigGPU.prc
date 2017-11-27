@@ -65,3 +65,6 @@ bullet-filter-algorithm groups-mask
 
 # Enable the multithreaded render pipeline (triples the framerate)
 #threading-model Cull/Draw
+
+# Disable V-Sync
+sync-video #f

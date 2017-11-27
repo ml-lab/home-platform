@@ -31,13 +31,15 @@ import logging
 import numpy as np
 import unittest
 import matplotlib.pyplot as plt
-from panda3d.core import SceneGraphAnalyzer
+from panda3d.core import TransformState, LVecBase3f, LMatrix4f
+from multimodalmaze.suncg import SunCgSceneLoader, loadModel
+from multimodalmaze.core import Scene
+from multimodalmaze.utils import Viewer
 
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data")
 TEST_SUNCG_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), "..", "data", "suncg")
 
-from multimodalmaze.core import House, Object, Agent
-from multimodalmaze.acoustics import EvertAcousticWorld, CipicHRTF, FilterBank, \
+from multimodalmaze.acoustics import EvertAcoustics, CipicHRTF, FilterBank, \
                                      MaterialAbsorptionTable, AirAttenuationTable
 
 class TestMaterialAbsorptionTable(unittest.TestCase):
@@ -66,10 +68,16 @@ class TestCipicHRTF(unittest.TestCase):
     
     def testInit(self):
         hrtf = CipicHRTF(filename=os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'),
-                         samplingRate=16000.0)
+                         samplingRate=44100.0)
         impulse = hrtf.getImpulseResponse(azimut=50.0, elevation=75.0)
         self.assertTrue(np.array_equal(hrtf.impulses.shape, [25,50,2,200]))
-        self.assertTrue(impulse.shape[0] == 2)
+        self.assertTrue(np.array_equal(impulse.shape, [2,200]))
+        
+        hrtf = CipicHRTF(filename=os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'),
+                         samplingRate=16000.0)
+        impulse = hrtf.getImpulseResponse(azimut=50.0, elevation=75.0)
+        self.assertTrue(np.array_equal(hrtf.impulses.shape, [25,50,2,72]))
+        self.assertTrue(np.array_equal(impulse.shape, [2,72]))
         
 class TestFilterBank(unittest.TestCase):
     
@@ -125,67 +133,62 @@ class TestFilterBank(unittest.TestCase):
         time.sleep(1.0)
         plt.close(fig)
         
-class TestEvertAcousticWorld(unittest.TestCase):
+class TestEvertAcoustics(unittest.TestCase):
         
     def testInit(self):
         
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3, debug=False)
-        engine.destroy()
-        
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=3, debug=True)
+        samplingRate = 16000.0
+        scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
+        hrtf = CipicHRTF(os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'), samplingRate)
+            
+        engine = EvertAcoustics(scene, hrtf, samplingRate, maximumOrder=3, debug=True)
         engine.destroy()
             
     def testRenderSimpleCubeRoom(self):
+         
+        samplingRate = 16000.0
+        scene = Scene()
+        hrtf = CipicHRTF(os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'), samplingRate)
         
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=4, materialAbsorption=False, frequencyDependent=False, debug=True)
-
+        viewer = Viewer(scene)
+        viewer.disableMouse()
+    
         # Define a simple cube (10 x 10 x 10 m) as room geometry
         roomSize = 10.0
-        instanceId = 'room'
-        modelId = '0'
+        modelId = 'room-0'
         modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'cube.egg')
-        transform = np.array([[roomSize, 0.0, 0.0, 0.0],
-                              [0.0, roomSize, 0.0, 0.0],
-                              [0.0, 0.0, roomSize, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
-        obj = Object(instanceId, modelId, modelFilename)
-        obj.setTransform(transform)
-        roomNode = engine.addObjectToScene(obj, mode='mesh')
-        roomNode.setRenderModeWireframe()
+        layoutNp = scene.scene.attachNewNode('layouts')
+        objectNp = layoutNp.attachNewNode('object-' + modelId)
+        objectNp.setTag('acoustics-mode', 'obstacle')
+        model = loadModel(modelFilename)
+        model.setName('model-' + modelId)
+        model.setTransform(TransformState.makeScale(roomSize))
+        model.setRenderModeWireframe()
+        model.reparentTo(objectNp)
+        objectNp.setPos(LVecBase3f(0.0, 0.0, 0.0))
         
-        # Define a listening agent
-        agentSize = 0.1
-        instanceId = 'agent'
-        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
-        transform = np.array([[agentSize, 0.0, 0.0, 0.0],
-                              [0.0, agentSize, 0.0, 0.0],
-                              [0.0, 0.0, agentSize, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
-        agent = Agent(instanceId, modelFilename)
-        agent.setTransform(transform)
-        agentNode = engine.addAgentToScene(agent, interauralDistance=0.25)
-
+        agentNp = scene.agents[0]
+        
         # Define a sound source
         sourceSize = 0.25
-        instanceId = 'source'
-        modelId = '0'
+        modelId = 'source-0'
         modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
-        transform = np.array([[sourceSize, 0.0, 0.0, 0.0],
-                              [0.0, sourceSize, 0.0, 0.0],
-                              [0.0, 0.0, sourceSize, 0.0],
-                              [0.0, 0.0, 0.0, 1.0]])
-        source = Object(instanceId, modelId, modelFilename)
-        source.setTransform(transform)
-        sourceNode = engine.addStaticSourceToScene(source)
-        sourceNode.setPos(0.0, 0.0, 0.0)
+        objectsNp = scene.scene.attachNewNode('objects')
+        objectNp = objectsNp.attachNewNode('object-' + modelId)
+        objectNp.setTag('acoustics-mode', 'source')
+        model = loadModel(modelFilename)
+        model.setName('model-' + modelId)
+        model.setTransform(TransformState.makeScale(sourceSize))
+        model.reparentTo(objectNp)
+        objectNp.setPos(LVecBase3f(0.0, 0.0, 0.0))
         
-        engine.updateGeometry()
-        
-        center = engine.world.getCenter()
-        self.assertTrue(np.allclose(engine.world.getMaxLength(), roomSize * 1000.0))
+        acoustics = EvertAcoustics(scene, hrtf, samplingRate, maximumOrder=3, materialAbsorption=False, frequencyDependent=False, debug=True)
+        acoustics.updateGeometry()
+        center = acoustics.world.getCenter()
+        self.assertTrue(np.allclose(acoustics.world.getMaxLength()/1000.0, roomSize))
         self.assertTrue(np.allclose([center.x, center.y, center.z],[0.0, 0.0, 0.0]))
-        self.assertTrue(engine.world.numElements() == 12)
-        self.assertTrue(engine.world.numConvexElements() == 12)
+        self.assertTrue(acoustics.world.numElements() == 12)
+        self.assertTrue(acoustics.world.numConvexElements() == 12)
         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
@@ -193,191 +196,133 @@ class TestEvertAcousticWorld(unittest.TestCase):
                         -0.00295702, 0.750104, -0.661314, 0,
                         -0.00260737, 0.661308, 0.75011, 0,
                         0.0, -25.0, 22, 1])
-        engine.setCamera(mat)
+        mat = LMatrix4f(*mat.ravel())
+        viewer.cam.setMat(mat)
         
-        agentNode.setPos(0.25 * roomSize, -0.25 * roomSize, 0.3 * roomSize)
-        engine.step()
-        image1 = engine.getRgbImage()
-        
-        agentNode.setPos(0.35 * roomSize, -0.35 * roomSize, 0.4 * roomSize)
-        engine.step()
-        image2 = engine.getRgbImage()
-        
-        agentNode.setPos(-0.25 * roomSize, 0.25 * roomSize, -0.3 * roomSize)
-        engine.step()
-        image3 = engine.getRgbImage()
-        
-        fig = plt.figure(figsize=(16,8))
-        ax = plt.subplot(131)
-        ax.imshow(image1)
-        ax = plt.subplot(132)
-        ax.imshow(image2)
-        ax = plt.subplot(133)
-        ax.imshow(image3)
-        plt.show(block=False)
+        agentNp.setPos(LVecBase3f(0.25 * roomSize, -0.25 * roomSize, 0.3 * roomSize))
+        for _ in range(10):
+            viewer.step()
         time.sleep(1.0)
-        plt.close(fig)
+         
+        agentNp.setPos(LVecBase3f(0.35 * roomSize, -0.35 * roomSize, 0.4 * roomSize))
+        for _ in range(10):
+            viewer.step()
+        time.sleep(1.0)
+        
+        agentNp.setPos(LVecBase3f(-0.25 * roomSize, 0.25 * roomSize, -0.3 * roomSize))
+        for _ in range(10):
+            viewer.step()
+        time.sleep(1.0)
         
         # Calculate and show impulse responses
-        impulseLeft = engine.calculateImpulseResponse(engine.solutions[0], maxImpulseLength=1.0, threshold=120.0)
-        impulseRight = engine.calculateImpulseResponse(engine.solutions[1], maxImpulseLength=1.0, threshold=120.0)
+        impulse = acoustics.calculateImpulseResponses()[0]
         
         fig = plt.figure()
-        plt.plot(impulseLeft, color='b', label='Left channel')
-        plt.plot(impulseRight, color='g', label='Right channel')
+        plt.plot(impulse.impulse[0], color='b', label='Left channel')
+        plt.plot(impulse.impulse[1], color='g', label='Right channel')
         plt.legend()
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
         
-        engine.destroy()
-            
+        acoustics.destroy()
+        viewer.destroy()
+        viewer.graphicsEngine.removeAllWindows()
+      
     def testRenderHouse(self):
+         
+        scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
+            
+        samplingRate = 16000.0
+        hrtf = CipicHRTF(os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'), samplingRate)
+        acoustics = EvertAcoustics(scene, hrtf, samplingRate, maximumOrder=3, debug=True)
         
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=8, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=True)
-        
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
-
-        engine.addHouseToScene(house)
-        
+        # Hide ceilings
+        for nodePath in scene.scene.findAllMatches('**/layouts/*/acoustics/*c'):
+            nodePath.hide()
+         
+        viewer = Viewer(scene)
+        viewer.disableMouse()
+         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
         mat = np.array([0.999992, 0.00394238, 0, 0,
                         -0.00295702, 0.750104, -0.661314, 0,
                         -0.00260737, 0.661308, 0.75011, 0,
                         43.621, -55.7499, 12.9722, 1])
-        engine.setCamera(mat)
-        engine.step()
-        image = engine.getRgbImage()
+        mat = LMatrix4f(*mat.ravel())
+        viewer.cam.setMat(mat)
         
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(111)
-        ax.imshow(image)
-        plt.show(block=False)
+        for _ in range(20):
+            acoustics.step(dt=0.1)
+            viewer.step()
         time.sleep(1.0)
-        plt.close(fig)
-        
-        engine.destroy()
+         
+        acoustics.destroy()
+        viewer.destroy()
+        viewer.graphicsEngine.removeAllWindows()
 
-    def testRenderRoom(self):
+    def testRenderHouseWithAcousticsPath(self):
 
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=2, materialAbsorption=True, frequencyDependent=True, showCeiling=False, debug=True)
+        scene = SunCgSceneLoader.loadHouseFromJson("0004d52d1aeeb8ae6de39d6bd993e992", TEST_SUNCG_DATA_DIR)
         
-        # Define the scene geometry
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
-        room = house.rooms[1]
-        self.assertTrue(room.instanceId == 'fr_0rm_1')
-        self.assertTrue(len(room.objects) == 18)
-        
-        roomNode = engine.addRoomToScene(room)
-        
-        minRefBounds, maxRefBounds = roomNode.getTightBounds()
-        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
-        
-        # Define a listening agent
-        instanceId = 'agent'
-        agent = Agent(instanceId)
-        agent.setOrientation((0, 0, np.pi/2))
-        agent.setPosition(np.array([-2.0, 1.0, -0.75]) + 
-                          np.array([refCenter.x, refCenter.y, refCenter.z]))
-        
-        engine.addAgentToScene(agent, interauralDistance=0.5)
+        agentNp = scene.agents[0]
+        agentNp.setPos(LVecBase3f(45, -42.5, 1.6))
+        agentNp.setHpr(45,0,0)
         
         # Define a sound source
-        instanceId = 'source'
-        modelId = '0'
-        source = Object(instanceId, modelId)
-        engine.addStaticSourceToScene(source)
-        source.setPosition(np.array([1.5, -1.0, -0.25]) + 
-                           np.array([refCenter.x, refCenter.y, refCenter.z]))
-
-        engine.updateGeometry()
+        sourceSize = 0.25
+        modelId = 'source-0'
+        modelFilename = os.path.join(TEST_DATA_DIR, 'models', 'sphere.egg')
+        objectsNp = scene.scene.attachNewNode('objects')
+        objectNp = objectsNp.attachNewNode('object-' + modelId)
+        objectNp.setTag('acoustics-mode', 'source')
+        model = loadModel(modelFilename)
+        model.setName('model-' + modelId)
+        model.setTransform(TransformState.makeScale(sourceSize))
+        model.reparentTo(objectNp)
+        objectNp.setPos(LVecBase3f(39, -40.5, 1.5))
         
+        samplingRate = 16000.0
+        hrtf = CipicHRTF(os.path.join(TEST_DATA_DIR, 'hrtf', 'cipic_hrir.mat'), samplingRate)
+        acoustics = EvertAcoustics(scene, hrtf, samplingRate, maximumOrder=2, debug=True)
+        
+        # Hide ceilings
+        for nodePath in scene.scene.findAllMatches('**/layouts/*/acoustics/*c'):
+            nodePath.hide()
+         
+        viewer = Viewer(scene)
+        viewer.disableMouse()
+         
         # Configure the camera
         #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
+        center = agentNp.getNetTransform().getPos()
         mat = np.array([[1.0, 0.0, 0.0, 0.0],
                         [0.0, 0.0, -1.0, 0.0],
                         [0.0, 1.0, 0.0, 0.0],
-                        [refCenter.x-0.5, refCenter.y-0.5, 15, 1]])
-        engine.setCamera(mat)
+                        [center.x, center.y, 20, 1]])
+        mat = LMatrix4f(*mat.ravel())
+        viewer.cam.setMat(mat)
         
-        engine.step()
-        image1 = engine.getRgbImage()
-        
-        agent.setPosition(agent.getPosition() + np.array([-0.5, 0.5, 0.0]))
-        engine.step()
-        image2 = engine.getRgbImage()
-        
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(121)
-        ax.imshow(image1)
-        ax = plt.subplot(122)
-        ax.imshow(image2)
-        plt.show(block=False)
+        for _ in range(10):
+            viewer.step()
         time.sleep(1.0)
-        plt.close(fig)
-        
+         
+        viewer.destroy()
+        viewer.graphicsEngine.removeAllWindows()
+         
         # Calculate and show impulse responses
-        impulseLeft = engine.calculateImpulseResponse(engine.solutions[0], maxImpulseLength=1.0, threshold=120.0)
-        impulseRight = engine.calculateImpulseResponse(engine.solutions[1], maxImpulseLength=1.0, threshold=120.0)
-        
+        impulse = acoustics.calculateImpulseResponses()[0]
+         
         fig = plt.figure()
-        plt.plot(impulseLeft, color='b', label='Left channel')
-        plt.plot(impulseRight, color='g', label='Right channel')
+        plt.plot(impulse.impulse[0], color='b', label='Left channel')
+        plt.plot(impulse.impulse[1], color='g', label='Right channel')
         plt.legend()
         plt.show(block=False)
         time.sleep(1.0)
         plt.close(fig)
-        
-        engine.destroy()
-
-    def testRenderRoomPolygons(self):
-
-        engine = EvertAcousticWorld(samplingRate=16000, maximumOrder=1, materialAbsorption=False, frequencyDependent=False, showCeiling=False, debug=True)
-        
-        # Define the scene geometry
-        house = House.loadFromJson(os.path.join(TEST_SUNCG_DATA_DIR, "house", "0004d52d1aeeb8ae6de39d6bd993e992", "house.json"),
-                                   TEST_SUNCG_DATA_DIR)
-        room = house.rooms[1]
-        self.assertTrue(room.instanceId == 'fr_0rm_1')
-        self.assertTrue(len(room.objects) == 18)
-        
-        roomNode = engine.addRoomToScene(room)
-        
-        minRefBounds, maxRefBounds = roomNode.getTightBounds()
-        refCenter = minRefBounds + (maxRefBounds - minRefBounds) / 2.0
-        
-        engine.updateGeometry()
-        
-        sga = SceneGraphAnalyzer()
-        sga.addNode(engine.render.node())
-        self.assertTrue(engine.world.numElements() <= sga.get_num_triangles_in_strips())
-        self.assertTrue(engine.world.numConvexElements() <= sga.get_num_triangles_in_strips())
-        
-        # Configure the camera
-        #NOTE: in Panda3D, the X axis points to the right, the Y axis is forward, and Z is up
-        mat = np.array([[1.0, 0.0, 0.0, 0.0],
-                        [0.0, 0.0, -1.0, 0.0],
-                        [0.0, 1.0, 0.0, 0.0],
-                        [refCenter.x-0.5, refCenter.y-0.5, 15, 1]])
-        engine.setCamera(mat)
-        
-        engine.step()
-        image = engine.getRgbImage()
-        
-        fig = plt.figure()
-        plt.axis("off")
-        ax = plt.subplot(111)
-        ax.imshow(image)
-        plt.show(block=False)
-        time.sleep(1.0)
-        plt.close(fig)
-        
-        engine.destroy()
+         
+        acoustics.destroy()
 
 if __name__ == '__main__':
     logging.basicConfig(level=logging.WARN)
