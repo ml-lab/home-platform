@@ -1,7 +1,7 @@
 # HoME Platform
 Household multimmodal environment (HoME) based on the SUNCG indoor scenes dataset.
 
-![alt tag](https://github.com/IGLU-CHISTERA/multimodal-maze/raw/master/doc/images/multimodalmaze.jpg)
+![alt tag](https://github.com/IGLU-CHISTERA/multimodal-maze/raw/master/doc/images/overview.png)
 
 ## Dependencies
 
